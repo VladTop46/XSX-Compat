@@ -77,11 +77,11 @@ __declspec(dllexport) SIZE_T XMemVirtualQuery(const void* addr, MEMORY_BASIC_INF
 //   BOOL  XMemFreePhysicalPages(SIZE_T pages, const ULONG_PTR* pageArray)
 // Эмуляция: id страниц — счётчик; Map коммитит [va, va+pages*64K) в ранее зарезервированном VA. Алиасинг страницы НЕ поддерживается.
 using phys::kPage;
-static volatile LONG64 g_nextPage = 0x1000, g_liveIds = 0;
+static volatile LONG64 g_nextPage = 0x100000 - 16, g_liveIds = 0;   // id кратны 16 (PFN в 4-КиБ единицах), см. phys.h
 __declspec(dllexport) BOOL XMemAllocatePhysicalPages(uint32_t attrs, size_t* pages, uintptr_t* array)
 {
     if (!pages || !array) return FALSE;
-    size_t n = *pages; for (size_t i = 0; i < n; i++) array[i] = (uintptr_t)InterlockedIncrement64(&g_nextPage);
+    size_t n = *pages; for (size_t i = 0; i < n; i++) array[i] = (uintptr_t)InterlockedAdd64(&g_nextPage, 16);
     InterlockedAdd64(&g_liveIds, (LONG64)n);
     XLOG("AllocatePhysicalPages attrs=0x%x pages=%zu (%zu MiB) -> ids %#llx..%#llx", attrs, n, n * kPage >> 20, n ? (unsigned long long)array[0] : 0ULL, n ? (unsigned long long)array[n - 1] : 0ULL);
     return TRUE;
@@ -110,20 +110,13 @@ __declspec(dllexport) BOOL XMemFreePhysicalPages(size_t pages, const uintptr_t* 
 // XMemMapPhysicalPagesScatter(void** addrs, SIZE_T count, const ULONG_PTR* pageIds) -> BOOL [по callsite 0x140f2cc3e: rcx=массив VA 64К-страниц, edx=число, r8=массив id].
 __declspec(dllexport) BOOL XMemMapPhysicalPagesScatter(void** addrs, size_t count, const uintptr_t* ids)
 {
-    { static int dumped = 0; if (dumped++ < 2) { char line[1200]; int pos = 0; for (size_t i = 0; i < count && i < 40; i++) pos += snprintf(line + pos, sizeof line - pos, " %p:%llx", addrs[i], ids ? (unsigned long long)ids[i] : 0ull); XLOG("Scatter RAW (va:id) %s", line); } }
+    { static int dumped = 0; if (dumped++ < 12) { char line[1600]; int pos = 0; for (size_t i = 0; i < count && i < 40; i++) pos += snprintf(line + pos, sizeof line - pos, " %llx:%llx", (unsigned long long)(((uintptr_t)addrs[i] >> 16) & 0xfffff), ids ? (unsigned long long)ids[i] : 0ull); XLOG("Scatter RAW (va:id) %s", line); } }
     // (id эффективные см. ниже)
     size_t viaSection = 0, unm = 0, privCnt = 0; std::vector<size_t> fb;
     if (phys::g.ok) {
         std::vector<std::pair<uintptr_t, uintptr_t>> pg; pg.reserve(count); std::vector<size_t> idx;
-        // Формат ids (по дампу): значение = база группы из 16 физ. страниц (1 МиБ large page); 16 подряд идущих VA несут одну базу,
-        // реальная страница = база + позиция VA в группе. Неполная первая группа выравнивается к концу (позиции 16-len..15).
-        std::vector<uintptr_t> eff(count);
-        for (size_t i = 0; ids && i < count;) {
-            size_t j = i; while (j + 1 < count && ids[j + 1] == ids[i] && (uintptr_t)addrs[j + 1] == (uintptr_t)addrs[j] + kPage) j++;
-            size_t len = j - i + 1, off = (i == 0 && len < 16) ? 16 - len : 0;
-            for (size_t k = 0; k < len; k++) eff[i + k] = ids[i] + ((len > 1 || ids[i] % 16 == 0) ? off + k : 0);
-            i = j + 1;
-        }
+        // ids — буквальные id страниц (кратны 16); см. phys.h. (Ранние «группы по 16» были артефактом id-счётчика.)
+        std::vector<uintptr_t> eff(count); for (size_t i = 0; ids && i < count; i++) eff[i] = ids[i];
         static long dupLimit = [] { char v[16]; return GetEnvironmentVariableA("XSX_XMEM_DUP_PRIVATE", v, sizeof v) ? atol(v) : 0L; }();
         std::map<uintptr_t, size_t> freq; if (ids && dupLimit > 0) for (size_t i = 0; i < count; i++) freq[eff[i]]++;
         for (size_t i = 0; i < count; i++) {

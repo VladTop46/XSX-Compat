@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include "apu_memory.h"
 
 namespace {
@@ -17,14 +18,61 @@ struct ShapeContexts {
 static_assert(offsetof(ShapeContexts, arrays) == 24 && sizeof(ShapeContexts) == 64);
 }
 
-#include <utility>
-// ДИАГНОСТИЧЕСКАЯ ЗАГЛУШКА (подтверждено только то, что игра требует S_OK от AcpHalCreate, иначе assert в exe+0x43ad94e):
-// объект с vtable из 32 слотов, каждый логирует вызов и возвращает S_OK. Реальный SHAPE command/message channel НЕ эмулируется.
-template <int N> static HRESULT WINAPI ShapeStub(void* self, void* a, void* b, void* c) {
-    static volatile long n = 0; if (InterlockedIncrement(&n) <= 24) std::fprintf(stderr, "[APU] SHAPE obj slot %d called (self=%p a=%p b=%p c=%p) -> S_OK (заглушка)\n", N, self, a, b, c);
+#include <deque>
+#include <mutex>
+// ---- Объект AcpHal (команды SHAPE / сообщения) --------------------------------------------------------------------------
+// Раскладка и семантика — по открытой реализации VIctory (crates/victory-hle/src/modules/audio.rs): vtable (без QueryInterface):
+//   [0] HRESULT connect(this, u32 commands, u32 messages)         — commands != 0, messages = ёмкость очереди сообщений
+//   [1] HRESULT disconnect(this)                                    — E_FAIL, если не подключён; кладёт DISCONNECTED
+//   [2] HRESULT submit(this, u32 command, u64 id, u32 frame, const void* data, u32 notification)
+//   [3] bool    pop_message(this, Message* out)                     — FIFO, не блокирует
+//   [4] u32     message_count(this)
+//   [5] void    release(this)
+// Команды выполняются мгновенно: REGISTER_MESSAGES(word0 маска kind) / UNREGISTER_MESSAGES; LOAD_FLOWGRAPH(word1 = id) → сообщение
+// FLOWGRAPH_COMPLETED; команда с id != 0 → COMMAND_COMPLETED{data[0..4]=command, [4..12]=id, [12..16]=frame}; notification (адрес APU-кучи) ← 1.
+// Остальные SHAPE-команды (контексты, XMA) принимаются и НЕ исполняются. fmod ждёт подтверждения первой команды в System_Create.
+namespace acp {
+enum : uint32_t { LOAD_FLOWGRAPH = 1, REGISTER_MESSAGES = 2, UNREGISTER_MESSAGES = 3 };
+enum : uint32_t { FLOWGRAPH_COMPLETED = 0x02, COMMAND_COMPLETED = 0x10, DISCONNECTED = 0x80 };
+#pragma pack(push, 1)
+struct Message { uint32_t kind, dropped, usec; uint8_t data[16]; };
+#pragma pack(pop)
+static_assert(sizeof(Message) == 28);
+struct Acp {
+    void** vt; std::mutex m; bool connected = false; uint32_t mask = 0; std::deque<Message> q; size_t capacity = 0; uint32_t dropped = 0; DWORD t0 = GetTickCount();
+    uint32_t usec() const { return (GetTickCount() - t0) * 1000u; }
+    uint32_t frame() const { return (uint32_t)((uint64_t)usec() * 375 / 1000000); }
+    void post(uint32_t kind, const void* d, size_t n) {
+        if (!(mask & kind)) return;
+        if (q.size() >= capacity) { dropped++; return; }
+        Message msg{}; msg.kind = kind; msg.dropped = dropped; dropped = 0; msg.usec = usec(); if (d && n <= 16) memcpy(msg.data, d, n); q.push_back(msg);
+    }
+};
+static HRESULT WINAPI Connect(Acp* a, uint32_t commands, uint32_t messages) {
+    if (!commands) return E_INVALIDARG;
+    std::lock_guard<std::mutex> l(a->m); a->connected = true; a->capacity = messages;
+    std::fprintf(stderr, "[APU] Acp::connect(commands=%u, messages=%u) -> S_OK\n", commands, messages); return S_OK;
+}
+static HRESULT WINAPI Disconnect(Acp* a) { std::lock_guard<std::mutex> l(a->m); if (!a->connected) return E_FAIL; a->post(DISCONNECTED, nullptr, 0); a->connected = false; return S_OK; }
+static HRESULT WINAPI Submit(Acp* a, uint32_t command, uint64_t id, uint32_t frame, const void* data, uint32_t notification) {
+    std::lock_guard<std::mutex> l(a->m);
+    auto word = [&](size_t i) -> uint32_t { return data && !IsBadReadPtr((const uint32_t*)data + i, 4) ? ((const uint32_t*)data)[i] : 0; };
+    static volatile long seen[64]; if (command < 64 && !InterlockedExchange(&seen[command], 1)) std::fprintf(stderr, "[APU] Acp::submit command=%u id=%#llx frame=%u data=%p notification=%#x (первый раз)\n", command, (unsigned long long)id, frame, data, notification);
+    switch (command) {
+    case REGISTER_MESSAGES: a->mask |= word(0); break;
+    case UNREGISTER_MESSAGES: a->mask &= ~word(0); break;
+    case LOAD_FLOWGRAPH: { uint32_t fg = word(1); a->post(FLOWGRAPH_COMPLETED, &fg, 4); break; }
+    default: break;
+    }
+    if (id) { uint8_t done[16] = {}; memcpy(done, &command, 4); memcpy(done + 4, &id, 8); uint32_t f = a->frame(); memcpy(done + 12, &f, 4); a->post(COMMAND_COMPLETED, done, 16); }
+    if (notification) { void* p = memory.pointer(notification); if (p) *(volatile uint32_t*)p = 1; }
     return S_OK;
 }
-template <int... I> static void FillShape(void** vt, std::integer_sequence<int, I...>) { ((vt[I] = (void*)&ShapeStub<I>), ...); }
+static bool WINAPI PopMessage(Acp* a, Message* out) { std::lock_guard<std::mutex> l(a->m); if (a->q.empty()) return false; if (out && !IsBadWritePtr(out, sizeof *out)) *out = a->q.front(); a->q.pop_front(); return true; }
+static uint32_t WINAPI MessageCount(Acp* a) { std::lock_guard<std::mutex> l(a->m); return (uint32_t)a->q.size(); }
+static void WINAPI Release(Acp* a) { delete a; }
+static void* g_vt[6] = { (void*)Connect, (void*)Disconnect, (void*)Submit, (void*)PopMessage, (void*)MessageCount, (void*)Release };
+}
 extern "C" {
 // Two DWORD arguments observed at exe RVA 0x43ad933. Pool policy is opaque;
 // record the request, but do not invent a cached/uncached heap partition.
@@ -77,11 +125,8 @@ HRESULT WINAPI AcpHalReleaseShapeContexts() {
 
 HRESULT WINAPI AcpHalCreate(void** output) {
     if (!output) return E_INVALIDARG;
-    static void* vt[32]; static bool init = false;
-    if (!init) { FillShape(vt, std::make_integer_sequence<int, 32>{}); init = true; }
-    // obj указывает на ячейку, содержащую указатель на vtable: [obj] = vt
-    static void* holder[2]; holder[0] = vt; holder[1] = nullptr; *output = holder;
-    std::fprintf(stderr, "[APU] AcpHalCreate: возвращён объект-заглушка (S_OK), SHAPE channel не эмулируется\n");
+    auto* a = new acp::Acp(); a->vt = acp::g_vt; *output = a;
+    std::fprintf(stderr, "[APU] AcpHalCreate -> объект Acp %p (команды мгновенные, сообщения по маске)\n", (void*)a);
     return S_OK;
 }
 }

@@ -20,6 +20,7 @@
 #include <atomic>
 #include <string>
 #include "inflate.h"
+#include "third_party/miniz/miniz.h"
 
 #define DLOG(...) do { fprintf(stderr, "[XCRDAPI] " __VA_ARGS__); fputc('\n', stderr); fflush(stderr); } while (0)
 static const GUID IID_Factory = {0x62959d11, 0xd45f, 0x4884, {0xa0, 0xa3, 0xf7, 0x86, 0x2e, 0xa2, 0x43, 0xae}};
@@ -66,9 +67,10 @@ static HANDLE STDMETHODCALLTYPE File_GetHandle(File* f) { return f->h; }
 static void* g_fileVt[5] = { (void*)QI_generic, (void*)AddRef_g, (void*)File_Release, (void*)File_Close, (void*)File_GetHandle };
 
 // ---------- Status array ----------
-struct Status { void** vt; volatile LONG ref; GUID iid; std::vector<HRESULT> hr; std::vector<char> done; std::mutex m; };
+struct Status { void** vt; volatile LONG ref; GUID iid; std::vector<HRESULT> hr; std::vector<char> done; std::vector<uint64_t> gen; std::mutex m; };
 static ULONG STDMETHODCALLTYPE Status_Release(Status* s) { LONG r = InterlockedDecrement(&s->ref); if (!r) delete s; return r; }
-static bool STDMETHODCALLTYPE Status_IsComplete(Status* s, uint32_t i) { std::lock_guard<std::mutex> g(s->m); return i < s->done.size() && s->done[i]; }
+static bool STDMETHODCALLTYPE Status_IsComplete(Status* s, uint32_t i) {
+    if (getenv("XSX_DS_LOG")) { static std::atomic<long> k{0}; if (k++ < 200) { std::lock_guard<std::mutex> g(s->m); DLOG("IsComplete status=%p idx=%u -> %d", (void*)s, i, i < s->done.size() ? (int)s->done[i] : -1); } } std::lock_guard<std::mutex> g(s->m); return i < s->done.size() && s->done[i]; }
 static HRESULT STDMETHODCALLTYPE Status_GetHResult(Status* s, uint32_t i) { std::lock_guard<std::mutex> g(s->m); return i < s->hr.size() ? s->hr[i] : E_INVALIDARG; }
 template <int K, int N> static uintptr_t __stdcall Obj_Unknown(void* self, uintptr_t a, uintptr_t b, uintptr_t c)
 { static std::atomic<int> n[2][32]; if (n[K][N]++ < 4) DLOG("%s slot %d НЕ реализован (this=%p a=%p b=%p c=%p) -> 0", K ? "queue" : "status", N, self, (void*)a, (void*)b, (void*)c); return 0; }
@@ -83,7 +85,7 @@ struct Queue {
     void** vt; volatile LONG ref; GUID iid;
     QueueDesc desc{}; std::string name;
     std::mutex m; std::condition_variable cv; std::deque<Entry> pending, submitted;
-    std::thread th; bool stop = false; HANDLE errEvent; HRESULT firstErr = S_OK; uint32_t failCount = 0; ErrorRecord rec{};
+    std::thread th; std::vector<std::thread> pool; int outstanding = 0; bool stop = false; HANDLE errEvent; HRESULT firstErr = S_OK; uint32_t failCount = 0; ErrorRecord rec{};
     Queue() { errEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr); }
 };
 static HRESULT ReadSource(const Entry& e, std::vector<uint8_t>& tmp)       // источник -> буфер (файл или память)
@@ -117,7 +119,10 @@ static HRESULT DoRequest(Queue* q, Entry& e)
       if (on && k++ < 20000) DLOG("REQ file=%ls off=0x%llx src=%llu dst=%llu inter=%llu opt=0x%llx dest=%p", e.file ? e.file->path.c_str() : L"(mem)", (unsigned long long)r.fileOffset, (unsigned long long)r.sourceSize, (unsigned long long)r.destSize, (unsigned long long)r.intermediateSize, (unsigned long long)r.options.asU64, r.destination); }
     std::vector<uint8_t> tmp; HRESULT hr = ReadSource(e, tmp); if (FAILED(hr)) return hr;
     if (r.options.o.zlib) {
-        size_t n = r.destSize; int rc = infl::inflate_zlib(tmp.data(), tmp.size(), (uint8_t*)r.destination, &n);
+        size_t n = r.destSize; int rc = 0;
+        { size_t got = tinfl_decompress_mem_to_mem(r.destination, r.destSize, tmp.data(), tmp.size(), TINFL_FLAG_PARSE_ZLIB_HEADER);
+          if (got == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) { n = r.destSize; rc = infl::inflate_zlib(tmp.data(), tmp.size(), (uint8_t*)r.destination, &n); }   // запасной путь
+          else n = got; }
         if (rc) { DLOG("request '%s' zlib inflate rc=%d (wrote %zu of %u)", e.name.c_str(), rc, n, r.destSize); return rc == 1 ? HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) : HRESULT_FROM_WIN32(ERROR_INVALID_DATA); }
         if (n != r.destSize) DLOG("request '%s' zlib: inflated %zu bytes, DestinationSize=%u (несовпадение)", e.name.c_str(), n, r.destSize);
         // Диагностика: XSX_DS_DUMP=N — сохранить первые N zlib-запросов (сжатый источник и наш результат) в T:\dsdump_NNN.{src,dst}
@@ -130,36 +135,42 @@ static HRESULT DoRequest(Queue* q, Entry& e)
     }
     uint32_t n = r.sourceSize < r.destSize ? r.sourceSize : r.destSize; memcpy(r.destination, tmp.data(), n); return S_OK;
 }
+// Пул: запросы (kind 0) выполняются параллельно; status/signal (kind 1/2) — только когда все ранее выданные запросы завершены
+// (семантика DStorage: status/signal отражают завершение всех предшествующих запросов очереди).
 static void Worker(Queue* q)
 {
     for (;;) {
         Entry e;
-        { std::unique_lock<std::mutex> l(q->m); q->cv.wait(l, [&] { return q->stop || !q->submitted.empty(); });
-          if (q->stop && q->submitted.empty()) return; e = std::move(q->submitted.front()); q->submitted.pop_front(); }
+        { std::unique_lock<std::mutex> l(q->m);
+          q->cv.wait(l, [&] { return q->stop || (!q->submitted.empty() && (q->submitted.front().kind == 0 || q->outstanding == 0)); });
+          if (q->stop && q->submitted.empty()) return;
+          e = std::move(q->submitted.front()); q->submitted.pop_front(); if (e.kind == 0) q->outstanding++; }
         if (e.kind == 0) {
             HRESULT hr = DoRequest(q, e);
             if (e.file) File_Release(e.file);
-            if (FAILED(hr)) {
-                std::lock_guard<std::mutex> l(q->m);
-                if (q->firstErr == S_OK) q->firstErr = hr;                 // первая ошибка с момента предыдущей status-записи
-                if (!q->failCount++) {                                      // первая с момента RetrieveErrorRecord
+            { std::lock_guard<std::mutex> l(q->m);
+              if (FAILED(hr)) {
+                if (q->firstErr == S_OK) q->firstErr = hr;
+                if (!q->failCount++) {
                     q->rec = {}; q->rec.first.hr = hr; q->rec.first.options = e.req.options.asU64; q->rec.first.dest = e.req.destination; q->rec.first.destSize = e.req.destSize;
                     q->rec.first.fileOffset = e.req.fileOffset; q->rec.first.sourceSize = e.req.sourceSize; q->rec.first.tag = e.req.cancelTag; strncpy(q->rec.first.name, e.name.c_str(), 63);
                     SetEvent(q->errEvent);
                 }
-                DLOG("request '%s' FAILED hr=0x%08lX offset=0x%llx size=%u", e.name.c_str(), (unsigned long)hr, (unsigned long long)e.req.fileOffset, e.req.sourceSize);
-            }
+              }
+              q->outstanding--; }
+            if (FAILED(hr)) DLOG("request '%s' FAILED hr=0x%08lX offset=0x%llx size=%u", e.name.c_str(), (unsigned long)hr, (unsigned long long)e.req.fileOffset, e.req.sourceSize);
+            q->cv.notify_all();
         } else if (e.kind == 1) {
             std::lock_guard<std::mutex> g(e.st->m); HRESULT hr; { std::lock_guard<std::mutex> l(q->m); hr = q->firstErr; q->firstErr = S_OK; }
-            if (e.idx < e.st->hr.size()) { e.st->hr[e.idx] = hr; e.st->done[e.idx] = 1; }
-            Status_Release(e.st);
-        } else if (e.kind == 2) { if (e.fence) { e.fence->Signal(e.val); e.fence->Release(); } }
+            if (e.idx < e.st->hr.size() && (e.idx >= e.st->gen.size() || e.st->gen[e.idx] == e.val)) { e.st->hr[e.idx] = hr; e.st->done[e.idx] = 1; }
+            Status_Release(e.st); q->cv.notify_all();
+        } else if (e.kind == 2) { if (e.fence) { e.fence->Signal(e.val); e.fence->Release(); } q->cv.notify_all(); }
     }
 }
 static ULONG STDMETHODCALLTYPE Queue_Release(Queue* q)
 {
     LONG r = InterlockedDecrement(&q->ref);
-    if (!r) { { std::lock_guard<std::mutex> l(q->m); q->stop = true; } q->cv.notify_all(); if (q->th.joinable()) q->th.join(); CloseHandle(q->errEvent); delete q; }
+    if (!r) { { std::lock_guard<std::mutex> l(q->m); q->stop = true; } q->cv.notify_all(); if (q->th.joinable()) q->th.join(); for (auto& t : q->pool) if (t.joinable()) t.join(); CloseHandle(q->errEvent); delete q; }
     return r;
 }
 static void QueueSubmit(Queue* q) { { std::lock_guard<std::mutex> l(q->m); while (!q->pending.empty()) { q->submitted.push_back(std::move(q->pending.front())); q->pending.pop_front(); } } q->cv.notify_all(); }
@@ -169,14 +180,31 @@ static void STDMETHODCALLTYPE Q_EnqueueRequest(Queue* q, const Request* r)
     static std::atomic<int> dumped{0}; if (dumped++ < 6) { const uint64_t* q = (const uint64_t*)r; DLOG("EnqueueRequest RAW: %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx", (unsigned long long)q[0], (unsigned long long)q[1], (unsigned long long)q[2], (unsigned long long)q[3], (unsigned long long)q[4], (unsigned long long)q[5], (unsigned long long)q[6], (unsigned long long)q[7], (unsigned long long)q[8], (unsigned long long)q[9]); }
     if (r->options.o.srcType == 0 && IsFile(r->file)) { e.file = (File*)r->file; InterlockedIncrement(&e.file->ref); }
     else if (r->options.o.srcType == 0) { DLOG("EnqueueRequest: поле file=%p не наш объект (раскладка запроса Xbox отличается от сэмпла)", r->file); e.req.sourceSize = 0; e.req.destSize = 0; e.req.options.o.srcType = 1; e.req.source = nullptr; }
+    { static bool on = [] { char v[16]; return GetEnvironmentVariableA("XSX_DS_LOG", v, sizeof v) > 0; }(); static std::atomic<long> k{0};
+      if (on && k++ < 20000) DLOG("ENQ q='%s'(%p) file=%ls off=0x%llx src=%llu dst=%llu opt=0x%llx pending=%zu", q->name.c_str(), (void*)q, e.file ? e.file->path.c_str() : L"(mem/неизв.)", (unsigned long long)r->fileOffset, (unsigned long long)r->sourceSize, (unsigned long long)r->destSize, (unsigned long long)r->options.asU64, q->pending.size()); }
     bool kick; { std::lock_guard<std::mutex> l(q->m); q->pending.push_back(std::move(e)); kick = q->pending.size() >= q->desc.capacity / 2u; }
     if (kick) QueueSubmit(q);
 }
+static bool DsLogOn() { static bool on = [] { char v[16]; return GetEnvironmentVariableA("XSX_DS_LOG", v, sizeof v) > 0; }(); return on; }
 static void STDMETHODCALLTYPE Q_EnqueueStatus(Queue* q, Status* s, uint32_t i)
-{ Entry e{}; e.kind = 1; e.st = s; e.idx = i; InterlockedIncrement(&s->ref); std::lock_guard<std::mutex> l(q->m); q->pending.push_back(std::move(e)); }
+{ if (DsLogOn()) { static std::atomic<long> k{0}; if (k++ < 3000) DLOG("ENQ-STATUS q=%p status=%p idx=%u", (void*)q, (void*)s, i); }
+  // Семантика DStorage: постановка status-записи переводит слот в «не завершён» до момента её обработки очередью.
+  // Игра переиспользует один слот (idx 0) для каждой пачки и сразу опрашивает IsComplete — без сброса она видела «готово»
+  // от прошлой пачки и разбирала ещё не записанные буферы (подмена файлов: setup2.xml, *.zmt → ассерты 0x1dac734/0x9dfc18).
+  // Слот отражает ТОЛЬКО последнюю поставленную status-запись: у каждой записи своё поколение; завершение более ранней записи
+  // (если игра поставила в тот же слот новую пачку, не дождавшись) слот не трогает.
+  uint64_t gen = 0;
+  if (s) { std::lock_guard<std::mutex> g(s->m); if (i < s->done.size()) { if (s->gen.size() < s->done.size()) s->gen.resize(s->done.size()); gen = ++s->gen[i]; s->done[i] = 0; s->hr[i] = S_OK; } }
+  Entry e{}; e.kind = 1; e.st = s; e.idx = i; e.val = gen; InterlockedIncrement(&s->ref); std::lock_guard<std::mutex> l(q->m); q->pending.push_back(std::move(e)); }
 static void STDMETHODCALLTYPE Q_EnqueueSignal(Queue* q, ID3D12Fence* f, uint64_t v)
-{ Entry e{}; e.kind = 2; e.fence = f; e.val = v; if (f) f->AddRef(); std::lock_guard<std::mutex> l(q->m); q->pending.push_back(std::move(e)); }
-static void STDMETHODCALLTYPE Q_Submit(Queue* q) { QueueSubmit(q); }
+{ if (DsLogOn()) { static std::atomic<long> k{0}; if (k++ < 3000) DLOG("ENQ-SIGNAL q=%p fence=%p value=%llu", (void*)q, (void*)f, (unsigned long long)v); }
+  Entry e{}; e.kind = 2; e.fence = f; e.val = v; if (f) f->AddRef(); std::lock_guard<std::mutex> l(q->m); q->pending.push_back(std::move(e)); }
+static void STDMETHODCALLTYPE Q_Submit(Queue* q)
+{
+    static bool on = [] { char v[16]; return GetEnvironmentVariableA("XSX_DS_LOG", v, sizeof v) > 0; }(); static std::atomic<long> k{0};
+    if (on && k++ < 5000) { size_t n; { std::lock_guard<std::mutex> l(q->m); n = q->pending.size(); } DLOG("SUBMIT q='%s'(%p) pending=%zu", q->name.c_str(), (void*)q, n); }
+    QueueSubmit(q);
+}
 static void STDMETHODCALLTYPE Q_Cancel(Queue* q, uint64_t mask, uint64_t value)
 { std::lock_guard<std::mutex> l(q->m); for (auto& e : q->pending) if (e.kind == 0 && (e.req.cancelTag & mask) == value) { e.req.sourceSize = 0; e.req.destSize = 0; e.req.options.o.srcType = 1; } }
 static void STDMETHODCALLTYPE Q_Close(Queue* q) { QueueSubmit(q); }
@@ -194,7 +222,10 @@ static HRESULT STDMETHODCALLTYPE F_CreateQueue(Factory*, const QueueDesc* d, REF
     if (!d || !ppv) return E_INVALIDARG;
     auto* q = new Queue(); q->vt = g_queueVt; q->ref = 1; q->iid = riid; q->desc = *d; q->name = d->name ? d->name : ""; q->desc.name = nullptr;
     if (!q->desc.capacity) q->desc.capacity = 0x80;
-    q->th = std::thread(Worker, q); *ppv = q;
+    q->th = std::thread(Worker, q);
+    { char v[16]; long n = GetEnvironmentVariableA("XSX_DS_THREADS", v, sizeof v) ? atol(v) : 0; if (n <= 0) { n = (long)std::thread::hardware_concurrency() / 2; if (n < 2) n = 2; if (n > 8) n = 8; }
+      for (long i = 1; i < n; i++) q->pool.emplace_back(Worker, q); }
+    *ppv = q;
     DLOG("CreateQueue name='%s' cap=%u prio=%d srcType=%llu riid={%08lX-..} -> %p", q->name.c_str(), q->desc.capacity, q->desc.priority, (unsigned long long)q->desc.sourceType, riid.Data1, (void*)q);
     return S_OK;
 }

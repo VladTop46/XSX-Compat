@@ -13,6 +13,8 @@ procedure.
   configuration.
 - Shader-container parsers, limited instruction translator, and PE/trace tools.
 - The frozen 62-check graphics source and earlier 13-check XMem source.
+- The miniz C/header dependency used by the storage fast path, retaining its
+  copyright and permission notice.
 - Curated public status/build documentation and external dependency notes.
 - An inventory of exported file sizes and SHA-256 hashes.
 
@@ -37,7 +39,8 @@ No referenced game payload is supplied by those descriptions.
 ## Export-only adjustments
 
 The runtime development tree is unchanged by this export. The snapshot includes
-the grouped-scatter correction observed during preparation. Further ongoing
+the Game Running / frame 82 checkpoint, PFN mapping, DStorage status generations,
+AcpHal completion FIFO, and diagnostic native presentation. Further ongoing
 changes in the private workspace are not synchronized automatically.
 
 The published copy:

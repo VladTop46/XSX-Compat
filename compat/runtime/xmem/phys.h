@@ -15,7 +15,11 @@
 namespace phys {
 
 static constexpr size_t kPage = 0x10000;
-static constexpr uintptr_t kFirstId = 0x1001;            // XMemAllocatePhysicalPages выдаёт id с 0x1001
+// id физической страницы = номер в 4-КиБ единицах (как PFN Xbox), кратен 16 для страницы 64 КиБ. Игра хранит id в упакованной таблице
+// (21 бит, id >> 4) и восстанавливает как entry << 4 (exe 0x140f2cbc1) — счётчик подряд (0x1001, 0x1002…) там схлопывался по 16.
+static constexpr uintptr_t kFirstId = 0x100000;
+static constexpr uintptr_t kIdStep = 16;
+static inline uint64_t IdOff(uintptr_t id) { return (uint64_t)((id - kFirstId) / kIdStep) * kPage; }
 static constexpr uint64_t kSectionSize = 16ull << 30;    // 16 ГиБ (разреженно; память расходуется только при записи)
 
 typedef PVOID (WINAPI* VirtualAlloc2Fn)(HANDLE, PVOID, SIZE_T, ULONG, ULONG, void*, ULONG);
@@ -73,13 +77,26 @@ static void* ReservePlaceholder(void* addr, size_t size)
     if (p) { std::lock_guard<std::mutex> l(g.m); g.regions[(uintptr_t)p] = size; }
     return p;
 }
+static uintptr_t RegionBase(uintptr_t va)
+{
+    std::lock_guard<std::mutex> l(g.m);
+    auto it = g.regions.upper_bound(va); if (it == g.regions.begin()) return 0; --it;
+    return (va >= it->first && va < it->first + it->second) ? it->first : 0;
+}
 static bool InOurRegion(uintptr_t va, size_t size)
 {
     auto it = g.regions.upper_bound(va); if (it == g.regions.begin()) return false; --it;
     return va >= it->first && va + size <= it->first + it->second;
 }
-static bool IdOk(uintptr_t id) { return id >= kFirstId && (uint64_t)(id - kFirstId + 1) * kPage <= kSectionSize; }
+static bool IdOk(uintptr_t id) { return id >= kFirstId && (id % kIdStep) == 0 && IdOff(id) + kPage <= kSectionSize; }
 
+static bool MapOne(uintptr_t va, size_t size, uintptr_t id0)
+{
+    VirtualFree((void*)va, size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);   // расщепить placeholder до [va, va+size) (ошибка = уже точный)
+    void* r = g.mv3(g.section, GetCurrentProcess(), (void*)va, (ULONG64)IdOff(id0), size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
+    if (!r) return false;
+    g.views[va] = {size, id0}; g.viewCount++; return true;
+}
 // Снять все view, пересекающиеся с [va, va+size); части view вне диапазона восстанавливаются (переотображаются).
 static bool UnmapRange(uintptr_t va, size_t size, void (*log)(const char*, ...))
 {
@@ -100,13 +117,16 @@ static bool UnmapRange(uintptr_t va, size_t size, void (*log)(const char*, ...))
             if (!s) return true;
             if (!g.va2) return false;
             if (s != v.size && !VirtualFree((void*)b, s, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) { /* уже точный placeholder */ }
-            void* r = g.mv3(g.section, GetCurrentProcess(), (void*)b, (ULONG64)(id - kFirstId) * kPage, s, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
-            if (!r) { log("phys: remap хвоста %p+%#zx err=%lu", (void*)b, s, GetLastError()); return false; }
-            g.views[b] = {s, id}; g.viewCount++; return true;
+            void* r = g.mv3(g.section, GetCurrentProcess(), (void*)b, (ULONG64)IdOff(id), s, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
+            if (r) { g.views[b] = {s, id}; g.viewCount++; return true; }
+            DWORD err = GetLastError(); size_t ok = 0, pages = s / kPage;
+            for (size_t k = 0; k < pages; k++) ok += MapOne(b + k * kPage, kPage, id + k * kIdStep);
+            if (ok != pages) { log("phys: remap хвоста %p+%#zx err=%lu, постранично %zu/%zu", (void*)b, s, err, ok, pages); return false; }
+            return true;
         };
         if (vb < va) { size_t s = va - vb; if (!remap(vb, s, v.id0)) return false; }
         uintptr_t vend = vb + v.size;
-        if (vend > end) { size_t s = vend - end; if (!remap(end, s, v.id0 + (end - vb) / kPage)) return false; }
+        if (vend > end) { size_t s = vend - end; if (!remap(end, s, v.id0 + (end - vb) / kPage * kIdStep)) return false; }
     }
     return true;
 }
@@ -116,11 +136,11 @@ static bool MapRun(uintptr_t va, size_t n, uintptr_t id0, void (*log)(const char
 {
     size_t size = n * kPage;
     if (!UnmapRange(va, size, log)) return false;
-    // расщепить placeholder до точного [va, va+size) (если он уже точный — VirtualFree вернёт ошибку, это нормально)
-    VirtualFree((void*)va, size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
-    void* r = g.mv3(g.section, GetCurrentProcess(), (void*)va, (ULONG64)(id0 - kFirstId) * kPage, size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
-    if (!r) { log("phys: MapViewOfFile3(va=%p, id=%#llx, n=%zu) err=%lu", (void*)va, (unsigned long long)id0, n, GetLastError()); return false; }
-    g.views[va] = {size, id0}; g.viewCount++;
+    if (MapOne(va, size, id0)) return true;
+    // Диапазон состоит из нескольких placeholder-кусков (после снятия соседних view) — отображаем постранично.
+    DWORD err = GetLastError(); size_t ok = 0;
+    for (size_t k = 0; k < n; k++) ok += MapOne(va + k * kPage, kPage, id0 + k * kIdStep);
+    if (ok != n) { log("phys: MapViewOfFile3(va=%p, id=%#llx, n=%zu) err=%lu, постранично %zu/%zu", (void*)va, (unsigned long long)id0, n, err, ok, n); return false; }
     return true;
 }
 
@@ -145,7 +165,7 @@ static size_t MapPages(const std::vector<std::pair<uintptr_t, uintptr_t>>& pages
         if (id == ~(uintptr_t)0 && InOurRegion(va, kPage)) { if (MapPrivate(va, log)) done++; else fallbackIdx.push_back(i); i++; continue; }
         if (!InOurRegion(va, kPage) || !IdOk(id)) { fallbackIdx.push_back(i); g.fallbacks++; i++; continue; }
         size_t n = 1;
-        while (i + n < pages.size() && pages[i + n].first == va + n * kPage && pages[i + n].second == id + n && IdOk(pages[i + n].second) && InOurRegion(va + n * kPage, kPage)) n++;
+        while (i + n < pages.size() && pages[i + n].first == va + n * kPage && pages[i + n].second == id + n * kIdStep && IdOk(pages[i + n].second) && InOurRegion(va + n * kPage, kPage)) n++;
         if (MapRun(va, n, id, log)) done += n; else for (size_t k = 0; k < n; k++) fallbackIdx.push_back(i + k);
         i += n;
     }

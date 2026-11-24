@@ -4,8 +4,8 @@
   "files": [
     {
       "path": ".gitattributes",
-      "size": 152,
-      "sha256": "baa983b18a5bc25a229788b2c2eb3ce3e3a7b456355549d49710eaab208a1906"
+      "size": 168,
+      "sha256": "5173ee64b03e76a280948e63e8ed027802511f7e54560d4647da8eb0c2cb079c"
     },
     {
       "path": ".gitignore",
@@ -14,13 +14,13 @@
     },
     {
       "path": "README.md",
-      "size": 62784,
-      "sha256": "03d8403147b388e3c08147b5c8fe9ae0e832fe512abdc26c281fdbac1cf15422"
+      "size": 60919,
+      "sha256": "0c303a70e4881652092cf5a62ec4394396480bb0d912ae3e254ebb44460f1e6a"
     },
     {
       "path": "THIRD_PARTY.md",
-      "size": 1892,
-      "sha256": "f1005246a7023011888ee3c172dd6657f9a0ebd605d4de7ba3cbac73d55fc2a1"
+      "size": 2761,
+      "sha256": "b517e268ea9f12eb1d2022f5fb9b4cd80dde29be2d0378b3ccb418044543d535"
     },
     {
       "path": "compat/build-audio.sh",
@@ -54,8 +54,8 @@
     },
     {
       "path": "compat/build-xcrdapi.sh",
-      "size": 419,
-      "sha256": "1491a58e58feab632823f30dff9453771c2b75a1b277e8bba54e7286218bffba"
+      "size": 545,
+      "sha256": "1d0d9484ee12b8bf7587dd5a417adfaecded9bab52a60e64053204b9cd1fcb08"
     },
     {
       "path": "compat/build-xgr_proxy.sh",
@@ -74,8 +74,8 @@
     },
     {
       "path": "compat/d3d12_xs/d3d12_xs.cpp",
-      "size": 101713,
-      "sha256": "3d19123838f576e2714663fde6d0500e10d524e24da81847433b4afa719c82aa"
+      "size": 123789,
+      "sha256": "65d5ae20ee0524720422b7cdf5f2335f8916220c616c2c400e684b83eb3fa876"
     },
     {
       "path": "compat/d3d12_xs/d3d12_xs.def",
@@ -184,8 +184,8 @@
     },
     {
       "path": "compat/runtime/audio/acphal.cpp",
-      "size": 4172,
-      "sha256": "43c3ebee9f9c47b19913e3d3ee4284701fac4fef23902797556122c8b9cbb6e6"
+      "size": 7717,
+      "sha256": "edc378194aacae5c67778755d6dcf49c05e3ef0328186a57d4d885fdeb2b3130"
     },
     {
       "path": "compat/runtime/audio/acphal.def",
@@ -218,9 +218,29 @@
       "sha256": "41c8a1380f1e5e750fa138a9b29c6d9d2f2b3ec7a71c522f7a186460d9ee3533"
     },
     {
+      "path": "compat/runtime/xcrdapi/third_party/miniz/LICENSE",
+      "size": 1161,
+      "sha256": "53231c04993ac0c8ac965aa48e632e46552d9d41f92686d5ec45d80d0b6c9e26"
+    },
+    {
+      "path": "compat/runtime/xcrdapi/third_party/miniz/README.txt",
+      "size": 369,
+      "sha256": "d6f91a3f53e2c933518a11e0b7e3d04c0a2e18e6bd1097ae0e8bce499bb670d7"
+    },
+    {
+      "path": "compat/runtime/xcrdapi/third_party/miniz/miniz.c",
+      "size": 316287,
+      "sha256": "bd2a5ae69adc3bc7d73fa37bf65dbabe84846758446a26009a827ff5d69a9c9c"
+    },
+    {
+      "path": "compat/runtime/xcrdapi/third_party/miniz/miniz.h",
+      "size": 67665,
+      "sha256": "c302824a332fa49dd7f6065d39dac9a86d52031058c949a66aed67ff4e60e059"
+    },
+    {
       "path": "compat/runtime/xcrdapi/xcrdapi.cpp",
-      "size": 20660,
-      "sha256": "ee799a75233e7b1569bfd74ac5e3895ebe54ec72c98931b23111601f863f01b3"
+      "size": 24492,
+      "sha256": "45199f0e8fc8979ebfe16f49e4c913105e7033f40ceb5f8af72b391bf88bcc7b"
     },
     {
       "path": "compat/runtime/xcrdapi/xcrdapi.def",
@@ -249,13 +269,13 @@
     },
     {
       "path": "compat/runtime/xmem/phys.h",
-      "size": 9703,
-      "sha256": "49337cf0fac83489e5e3d6afb024c5c54a4cd53c07f2c55096f7d3593174a244"
+      "size": 11105,
+      "sha256": "e741ef6ca9a6e1e825c0f74311e82611bf406eec4ec691eb94c9934bfeede83f"
     },
     {
       "path": "compat/runtime/xmem/xmem.cpp",
-      "size": 10752,
-      "sha256": "a4895829fea6072a5df0f4afbed2630849e20f3b6c3f7be7e1ebdf2619aa64f9"
+      "size": 10306,
+      "sha256": "e11c2ba01e7a23919ba2d86f6f1031d7b76c5c78d8c4d267edb4641f632e7349"
     },
     {
       "path": "compat/runtime/xmem/xmem.def",
@@ -284,8 +304,8 @@
     },
     {
       "path": "compat/sandbox/xsx-sandbox.sh",
-      "size": 4649,
-      "sha256": "16042c4a272cc90be23c70f7c7a21c30781db1a7e35cf1b8b22dade7ef707c02"
+      "size": 4663,
+      "sha256": "b92e19477501463dc52eb036d4a9078af6a250f45db3a79eaba33c47949dc157"
     },
     {
       "path": "compat/stubs/AcpHal.cpp",
@@ -474,8 +494,8 @@
     },
     {
       "path": "compat/tests/xmem-alias-test.cpp",
-      "size": 2921,
-      "sha256": "5bcb58542d86a9b7b73c3eb208a7924c31f0c2d05873c4658423c5096b9f3ff7"
+      "size": 3622,
+      "sha256": "faef9a082da06a248ad66fd5640d2ae69b98a5a4cc93b8e6999cde57733f8952"
     },
     {
       "path": "compat/tests/xmem-test.cpp",
@@ -594,28 +614,28 @@
     },
     {
       "path": "docs/BUILDING.md",
-      "size": 8225,
-      "sha256": "e89a26f68fb614b6eaf804a40817c4400cff8fd19c2fa459c3c6b1b6a098ae07"
+      "size": 8380,
+      "sha256": "e1419207fe5f877bc2690fd00542bad6d8d3cf23ede9b6b0cf63babd87f6586e"
     },
     {
       "path": "docs/PUBLICATION.md",
-      "size": 4174,
-      "sha256": "e60374b2efbce35d48e1c39947c998b0d7518141d03dc1bba5c5889f37d87cb4"
+      "size": 4368,
+      "sha256": "6c0c418e86609693a80002ae81e4eeb04eb7f633903e56129717fcd1ae9fd60e"
     },
     {
       "path": "docs/STATUS.md",
-      "size": 6626,
-      "sha256": "66813e09408802d54fb83b8c2366cf922ba8dc13865c1607846de3b0b4effeba"
+      "size": 5531,
+      "sha256": "d89807a52530dc075d1d9859c1ca960e5f910fabe8c14c9a5aeb5838b8b7fcf3"
     },
     {
       "path": "docs/VALIDATION.md",
-      "size": 1989,
-      "sha256": "06152adb2d301b61682f51fc9293db72060e6b2c78f4ec078d6deaec418af955"
+      "size": 2483,
+      "sha256": "738e2eb3b8a0188d9bd3e0d207c709972e903b2b32b1aa29d76257908b403fbf"
     },
     {
       "path": "source-provenance.json",
-      "size": 35594,
-      "sha256": "896eeb184f97dcf32bcbcdd57a54a8f969821b9bcb24eec01e1e3a2946c56f2d"
+      "size": 36872,
+      "sha256": "90023a90931a7ad6a105f1ad98a134d57bb241857e06a9ce2def84eeb83020db"
     },
     {
       "path": "tests/00-hello/Main.cpp",
@@ -689,8 +709,8 @@
     },
     {
       "path": "tools/audit-public-tree.py",
-      "size": 6343,
-      "sha256": "109d80682d4948adacb73acb18bc6924dbb027dca392a7cd11282779ae77bb0e"
+      "size": 6509,
+      "sha256": "09c2a5c835daf8f12b086faba9cadf7e8343e3a4964b3776847c31f7fd3071f7"
     }
   ]
 }

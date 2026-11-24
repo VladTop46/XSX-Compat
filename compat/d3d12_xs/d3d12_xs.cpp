@@ -1,9 +1,11 @@
 #include <vector>
+#include <map>
 // d3d12_xs.dll — прототип слоя совместимости Xbox Series D3D12 -> PC D3D12 (VKD3D-Proton).
 // Экспорты соответствуют импортам game_scarlett_master.exe и Xbox FidelityFX DLL.
 // Сигнатуры D3D12XboxCreateDevice/D3D12ConfigureVirtualMemoryX восстановлены по
 // использованию в GDK samples (публичных заголовков d3d12_xs.h в checkout нет).
 #include <atomic>
+#include <dxgi1_4.h>
 #include <windows.h>
 #include <d3d12.h>
 #include <cstdio>
@@ -30,6 +32,7 @@ static void CallerStr(void* ret, char* out, size_t n)
 
 // First-chance logging only: the game's own crash handler sometimes emits an
 // empty .dmp. Never handle/skip the fault or alter the supplied CONTEXT.
+static void DumpAllThreads();
 static LONG CALLBACK TraceGraphicsFault(EXCEPTION_POINTERS* exception)
 {
     const DWORD code = exception->ExceptionRecord->ExceptionCode;
@@ -52,6 +55,14 @@ static LONG CALLBACK TraceGraphicsFault(EXCEPTION_POINTERS* exception)
         if (code == EXCEPTION_ACCESS_VIOLATION && (uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0xb5a5f8) {
             uintptr_t b0 = (uintptr_t)GetModuleHandleA(nullptr); uint64_t g[24] = {}; ReadProcessMemory(GetCurrentProcess(), (void*)(b0 + 0x75d5980), g, sizeof g, nullptr);
             for (int i = 0; i < 24; i++) XS_LOG("GLOBAL exe+%#x = %p", 0x75d5980 + i * 8, (void*)g[i]);
+        }
+        if (code == EXCEPTION_BREAKPOINT) { static volatile LONG once = 0; char v[4]; if (GetEnvironmentVariableA("XSX_THREAD_DUMP", v, sizeof v) && !InterlockedExchange(&once, 1)) DumpAllThreads(); }
+        if (code == EXCEPTION_BREAKPOINT && (uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0x55aa5eb) {
+            unsigned char b[256] = {}; SIZE_T u = 0; ReadProcessMemory(GetCurrentProcess(), (void*)(r.Rcx - 0x40), b, sizeof b, &u);
+            for (int row = 0; row < 16; row++) { char h[80] = {}; for (int q = 0; q < 16; q++) sprintf(h + q * 3, "%02x ", b[row * 16 + q]); XS_LOG("HEAPNODE %p: %s", (void*)(r.Rcx - 0x40 + row * 16), h); }
+            { static unsigned char big[0x4000]; SIZE_T u2 = 0; ReadProcessMemory(GetCurrentProcess(), (void*)(r.Rcx - 0x2000), big, sizeof big, &u2);
+              HANDLE f = CreateFileA("T:\\heapnode.bin", GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0); DWORD wr; if (f != INVALID_HANDLE_VALUE) { WriteFile(f, big, (DWORD)u2, &wr, 0); CloseHandle(f); } }
+            MEMORY_BASIC_INFORMATION mbi{}; VirtualQuery((void*)r.Rcx, &mbi, sizeof mbi); XS_LOG("HEAPNODE region base=%p alloc=%p size=%#zx type=%#lx", mbi.BaseAddress, mbi.AllocationBase, mbi.RegionSize, mbi.Type);
         }
         if (code == EXCEPTION_BREAKPOINT && breakpoints == 1) { unsigned char big[0x200] = {}; SIZE_T u = 0; if (ReadProcessMemory(GetCurrentProcess(), (void*)r.R14, big, sizeof big, &u) && u) { char path[MAX_PATH]; GetEnvironmentVariableA("XSX_BP_DUMP", path, sizeof path) ? (void)0 : (void)strcpy(path, "C:\\bp-blob.bin"); HANDLE f = CreateFileA(path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0); DWORD wr; if (f != INVALID_HANDLE_VALUE) { WriteFile(f, big, (DWORD)u, &wr, 0); CloseHandle(f); } } }
         if (code == EXCEPTION_BREAKPOINT && (uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0x1dac734) {
@@ -106,6 +117,27 @@ static void WatchAllThreads(uintptr_t a0, uintptr_t a1)
         CloseHandle(h);
     }
     CloseHandle(snap);
+}
+
+// Дамп стеков всех потоков при первом EXCEPTION_BREAKPOINT (если XSX_THREAD_DUMP=1): RIP и адреса exe из первых 256 qword стека.
+static void DumpAllThreads()
+{
+    struct Rec { DWORD tid; uintptr_t rip, rsp; std::vector<std::pair<int, uintptr_t>> frames; };
+    std::vector<Rec> recs; uintptr_t b0 = (uintptr_t)GetModuleHandleA(nullptr);
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0); if (snap == INVALID_HANDLE_VALUE) return; THREADENTRY32 te{sizeof te};
+    std::vector<HANDLE> susp;
+    for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+        if (te.th32OwnerProcessID != GetCurrentProcessId() || te.th32ThreadID == GetCurrentThreadId()) continue;
+        HANDLE h = OpenThread(THREAD_ALL_ACCESS, FALSE, te.th32ThreadID); if (!h) continue;
+        if (SuspendThread(h) == (DWORD)-1) { CloseHandle(h); continue; }
+        susp.push_back(h); Rec r{te.th32ThreadID, 0, 0, {}}; CONTEXT c{}; c.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+        if (GetThreadContext(h, &c)) { r.rip = c.Rip; r.rsp = c.Rsp; int shown = 0;
+            for (int q = 0; q < 512 && shown < 16; q++) { uintptr_t v = 0; if (!ReadProcessMemory(GetCurrentProcess(), (void*)(c.Rsp + q * 8), &v, 8, nullptr)) break; if (v > b0 && v < b0 + 0x8000000) { r.frames.push_back({q * 8, v - b0}); shown++; } } }
+        recs.push_back(std::move(r));
+    }
+    CloseHandle(snap);
+    for (HANDLE h : susp) { ResumeThread(h); CloseHandle(h); }
+    for (auto& r : recs) { char who[200]; CallerStr((void*)r.rip, who, sizeof who); XS_LOG("THREAD %lu rip=%s", r.tid, who); for (auto& f : r.frames) XS_LOG("THREAD %lu   stk+%#x exe+%#llx", r.tid, f.first, (unsigned long long)f.second); }
 }
 static LONG CALLBACK TrapHandler(EXCEPTION_POINTERS* e)
 {
@@ -165,6 +197,12 @@ static LONG CALLBACK TrapHandler(EXCEPTION_POINTERS* e)
                 if (ov) { DWORD lo = 0, hi = 0; ReadProcessMemory(GetCurrentProcess(), (void*)(ov + 0x10), &lo, 4, nullptr); ReadProcessMemory(GetCurrentProcess(), (void*)(ov + 0x14), &hi, 4, nullptr); off = ((uint64_t)hi << 32) | lo; }
                 wchar_t nm[300] = {}; GetFinalPathNameByHandleW((HANDLE)r.Rcx, nm, 299, 0); uintptr_t ra = 0; ReadProcessMemory(GetCurrentProcess(), (void*)r.Rsp, &ra, 8, nullptr); char who[120]; CallerStr((void*)ra, who, sizeof who);
                 static std::atomic<int> k{0}; if (k++ < 3000) XS_LOG("READFILE %ls off=%#llx size=%#llx buf=%p ov=%p caller=%s", nm, (unsigned long long)off, (unsigned long long)r.R8, (void*)r.Rdx, (void*)ov, who); } }
+            if ((uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0x28cfaf2) {
+                uintptr_t vt = 0, fn = 0; ReadProcessMemory(GetCurrentProcess(), (void*)r.Rcx, &vt, 8, nullptr); ReadProcessMemory(GetCurrentProcess(), (void*)(vt + 0x230), &fn, 8, nullptr);
+                char a1[160], a2[160]; CallerStr((void*)vt, a1, sizeof a1); CallerStr((void*)fn, a2, sizeof a2);
+                uint64_t st[4] = {}; ReadProcessMemory(GetCurrentProcess(), (void*)(r.Rsp + 0x20), st, sizeof st, nullptr);
+                static std::atomic<int> k{0}; if (k++ < 4000) XS_LOG("BLOCKREAD obj=%p vt=%s fn=%s edx=%#llx file=%p off=%#llx a5=%#llx a6=%p a7=%p comp=%#llx", (void*)r.Rcx, a1, a2, (unsigned long long)r.Rdx, (void*)r.R8, (unsigned long long)r.R9, (unsigned long long)st[0], (void*)st[1], (void*)st[2], (unsigned long long)(st[3] & 0xff));
+            }
             bool atLoad = (uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0x19f7d26;   // после чтения потока целиком: r15=буфер, edi=размер (GetSize)
             if (((uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0x407e700 && r.Rdx > 0x10000) || atLoad) {
                 if (atLoad) { r.Rdx = r.Rdx; }
@@ -414,9 +452,34 @@ static uint64_t __stdcall Dev_GetAdapterLuid(Wrap* w)        // LUID — 8 ба�
 {
     LUID l = {}; ((void* (*)(void*, LUID*))(*(void***)w->real)[43])(w->real, &l); return *(uint64_t*)&l;
 }
+static inline void* Unwrap(void* p) { uintptr_t u = (uintptr_t)p; return (u >= g_arena_lo && u < g_arena_hi) ? ((Wrap*)p)->real : p; }
+static const int kObjSlots = 192;
+static void* g_vtRes[kObjSlots];
+static void InitObjVts();
+static HRESULT WrapOutput(HRESULT hr, void** out, void** vt, int kind);
+// Xbox-расширения DXGI_FORMAT (116..120 и т.п.) не существуют на PC → VKD3D отвергает ресурс/вид. Отображаем на ближайшие PC-форматы.
+// 116 R10G10B10_7E3_A2_FLOAT, 117 R10G10B10_6E4_A2_FLOAT → R10G10B10A2_UNORM (неточно: float-каналы); 118 D16_UNORM_S8_UINT → D24_UNORM_S8_UINT;
+// 119 R16_UNORM_X8_TYPELESS → R24_UNORM_X8_TYPELESS; 120 X16_TYPELESS_G8_UINT → X24_TYPELESS_G8_UINT; 189/190 R10G10B10_SNORM_A2_UNORM → R10G10B10A2_UNORM.
+// Типless-база для D16S8 (если игра создаёт ресурс как D16_UNORM_S8_UINT, а виды — 119/120) → R24G8_TYPELESS.
+static DXGI_FORMAT XboxFormatToPc(DXGI_FORMAT f, bool resource = false)
+{
+    switch ((int)f) {
+    case 116: case 117: case 189: case 190: return DXGI_FORMAT_R10G10B10A2_UNORM;
+    case 118: return resource ? DXGI_FORMAT_R24G8_TYPELESS : DXGI_FORMAT_D24_UNORM_S8_UINT;
+    case 119: return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    case 120: return DXGI_FORMAT_X24_TYPELESS_G8_UINT;
+    default: return f;
+    }
+}
+static void LogXboxFormat(const char* where, int f)
+{
+    static std::atomic<int> n{0}; if ((f >= 116 && f <= 129) || f >= 133) { if (n++ < 24) XS_LOG("FORMAT Xbox %d -> PC %d (%s)", f, (int)XboxFormatToPc((DXGI_FORMAT)f), where); }
+}
 static D3D12_RESOURCE_DESC PcResourceDesc(const D3D12_RESOURCE_DESC& xbox)
 {
     D3D12_RESOURCE_DESC pc = xbox;
+    LogXboxFormat("resource", (int)xbox.Format);
+    pc.Format = XboxFormatToPc(xbox.Format, true);   // D16S8 -> R24G8_TYPELESS (виды 118/119/120 -> D24S8 / R24X8 / X24G8)
     // Preserve the existing FFX 0xc00000 stripping and also remove observed
     // Xbox 0x300000 allocation bits, which are unknown PC resource flags.
     pc.Flags = (D3D12_RESOURCE_FLAGS)((unsigned)xbox.Flags & 0x0fffff);
@@ -425,8 +488,10 @@ static D3D12_RESOURCE_DESC PcResourceDesc(const D3D12_RESOURCE_DESC& xbox)
     // PC D3D12 forbids DEPTH_STENCIL|UNORDERED_ACCESS on the same resource.
     // Allocate depth-only backing consistently in sizing AND creation. This
     // does not emulate Xbox UAV access to the depth surface (needs a shadow).
-    if (((unsigned)xbox.Flags & 0x300000) && xbox.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D &&
-        xbox.Format == DXGI_FORMAT_R32G8X24_TYPELESS &&
+    if (xbox.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D &&   // (раньше только при Xbox-битах 0x300000; встречается и 0x800000)
+        (xbox.Format == DXGI_FORMAT_R32G8X24_TYPELESS || (int)xbox.Format == 118 || xbox.Format == DXGI_FORMAT_R24G8_TYPELESS ||
+         xbox.Format == DXGI_FORMAT_R32_TYPELESS || xbox.Format == DXGI_FORMAT_R16_TYPELESS || xbox.Format == DXGI_FORMAT_D32_FLOAT ||
+         xbox.Format == DXGI_FORMAT_D24_UNORM_S8_UINT || xbox.Format == DXGI_FORMAT_D16_UNORM || xbox.Format == DXGI_FORMAT_D32_FLOAT_S8X24_UINT) &&
         ((unsigned)pc.Flags & (D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)) ==
         (D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)) {
         pc.Flags = (D3D12_RESOURCE_FLAGS)((unsigned)pc.Flags & ~D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
@@ -441,6 +506,7 @@ static HRESULT __stdcall Dev_CreateCommittedResource76(Wrap* w, const D3D12_HEAP
 {
     D3D12_RESOURCE_DESC d = PcResourceDesc(*rd);
     HRESULT hr = ((ID3D12Device*)w->real)->CreateCommittedResource(hp, hf, &d, st, cv, riid, out);
+    if (SUCCEEDED(hr) && out && *out && IsEqualGUID(riid, __uuidof(ID3D12Resource))) { InitObjVts(); hr = WrapOutput(hr, out, g_vtRes, 8); }
     XS_LOG("DEVICE slot76 CreateCommittedResource dim=%d %llux%u fmt=%d flags=0x%x->0x%x state=0x%x -> 0x%08lX res=%p", (int)rd->Dimension, (unsigned long long)rd->Width, rd->Height,
            (int)rd->Format, (unsigned)rd->Flags, (unsigned)d.Flags, (unsigned)st, (unsigned long)hr, out ? *out : nullptr);
     return hr;
@@ -459,10 +525,14 @@ static inline uint64_t XlatCpu(uint64_t h)
     return h;
 }
 static void __stdcall Dev_CreateCBV(Wrap* w, const D3D12_CONSTANT_BUFFER_VIEW_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h) { h.ptr = XlatCpu(h.ptr); ((ID3D12Device*)w->real)->CreateConstantBufferView(d, h); }
-static void __stdcall Dev_CreateSRV(Wrap* w, ID3D12Resource* r, const D3D12_SHADER_RESOURCE_VIEW_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h) { h.ptr = XlatCpu(h.ptr); ((ID3D12Device*)w->real)->CreateShaderResourceView(r, d, h); }
-static void __stdcall Dev_CreateUAV(Wrap* w, ID3D12Resource* r, ID3D12Resource* c, const D3D12_UNORDERED_ACCESS_VIEW_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h) { h.ptr = XlatCpu(h.ptr); ((ID3D12Device*)w->real)->CreateUnorderedAccessView(r, c, d, h); }
-static void __stdcall Dev_CreateRTV(Wrap* w, ID3D12Resource* r, const D3D12_RENDER_TARGET_VIEW_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h) { h.ptr = XlatCpu(h.ptr); ((ID3D12Device*)w->real)->CreateRenderTargetView(r, d, h); }
-static void __stdcall Dev_CreateDSV(Wrap* w, ID3D12Resource* r, const D3D12_DEPTH_STENCIL_VIEW_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h) { h.ptr = XlatCpu(h.ptr); ((ID3D12Device*)w->real)->CreateDepthStencilView(r, d, h); }
+static void __stdcall Dev_CreateSRV(Wrap* w, ID3D12Resource* r, const D3D12_SHADER_RESOURCE_VIEW_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h)
+{ h.ptr = XlatCpu(h.ptr); D3D12_SHADER_RESOURCE_VIEW_DESC c; if (d) { c = *d; LogXboxFormat("SRV", (int)d->Format); c.Format = XboxFormatToPc(d->Format); d = &c; } ((ID3D12Device*)w->real)->CreateShaderResourceView((ID3D12Resource*)Unwrap(r), d, h); }
+static void __stdcall Dev_CreateUAV(Wrap* w, ID3D12Resource* r, ID3D12Resource* c, const D3D12_UNORDERED_ACCESS_VIEW_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h)
+{ h.ptr = XlatCpu(h.ptr); D3D12_UNORDERED_ACCESS_VIEW_DESC x; if (d) { x = *d; LogXboxFormat("UAV", (int)d->Format); x.Format = XboxFormatToPc(d->Format); d = &x; } ((ID3D12Device*)w->real)->CreateUnorderedAccessView((ID3D12Resource*)Unwrap(r), (ID3D12Resource*)Unwrap(c), d, h); }
+static void __stdcall Dev_CreateRTV(Wrap* w, ID3D12Resource* r, const D3D12_RENDER_TARGET_VIEW_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h)
+{ h.ptr = XlatCpu(h.ptr); D3D12_RENDER_TARGET_VIEW_DESC x; if (d) { x = *d; LogXboxFormat("RTV", (int)d->Format); x.Format = XboxFormatToPc(d->Format); d = &x; } ((ID3D12Device*)w->real)->CreateRenderTargetView((ID3D12Resource*)Unwrap(r), d, h); }
+static void __stdcall Dev_CreateDSV(Wrap* w, ID3D12Resource* r, const D3D12_DEPTH_STENCIL_VIEW_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h)
+{ h.ptr = XlatCpu(h.ptr); D3D12_DEPTH_STENCIL_VIEW_DESC x; if (d) { x = *d; LogXboxFormat("DSV", (int)d->Format); x.Format = XboxFormatToPc(d->Format); d = &x; } ((ID3D12Device*)w->real)->CreateDepthStencilView((ID3D12Resource*)Unwrap(r), d, h); }
 static void __stdcall Dev_CreateSampler(Wrap* w, const D3D12_SAMPLER_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h) { h.ptr = XlatCpu(h.ptr); ((ID3D12Device*)w->real)->CreateSampler(d, h); }
 static void __stdcall Dev_CopyDescriptors(Wrap* w, UINT nd, const D3D12_CPU_DESCRIPTOR_HANDLE* ds, const UINT* dsz, UINT ns, const D3D12_CPU_DESCRIPTOR_HANDLE* ss, const UINT* ssz, D3D12_DESCRIPTOR_HEAP_TYPE t)
 {
@@ -504,12 +574,11 @@ static void __stdcall ListSlot48(Wrap* w, uintptr_t argument, uintptr_t third, u
     D3D12_CPU_DESCRIPTOR_HANDLE h{XlatCpu(argument)};
     list->ClearRenderTargetView(h, (const FLOAT*)third, (UINT)fourth, rc);
 }
-static void __stdcall List_ClearUAVUint(Wrap* w, D3D12_GPU_DESCRIPTOR_HANDLE g, D3D12_CPU_DESCRIPTOR_HANDLE h, ID3D12Resource* r, const UINT* v, UINT nr, const D3D12_RECT* rc) { h.ptr = XlatCpu(h.ptr); ((ID3D12GraphicsCommandList*)w->real)->ClearUnorderedAccessViewUint(g, h, r, v, nr, rc); }
-static void __stdcall List_ClearUAVFloat(Wrap* w, D3D12_GPU_DESCRIPTOR_HANDLE g, D3D12_CPU_DESCRIPTOR_HANDLE h, ID3D12Resource* r, const FLOAT* v, UINT nr, const D3D12_RECT* rc) { h.ptr = XlatCpu(h.ptr); ((ID3D12GraphicsCommandList*)w->real)->ClearUnorderedAccessViewFloat(g, h, r, v, nr, rc); }
+static void __stdcall List_ClearUAVUint(Wrap* w, D3D12_GPU_DESCRIPTOR_HANDLE g, D3D12_CPU_DESCRIPTOR_HANDLE h, ID3D12Resource* r, const UINT* v, UINT nr, const D3D12_RECT* rc) { h.ptr = XlatCpu(h.ptr); ((ID3D12GraphicsCommandList*)w->real)->ClearUnorderedAccessViewUint(g, h, (ID3D12Resource*)Unwrap(r), v, nr, rc); }
+static void __stdcall List_ClearUAVFloat(Wrap* w, D3D12_GPU_DESCRIPTOR_HANDLE g, D3D12_CPU_DESCRIPTOR_HANDLE h, ID3D12Resource* r, const FLOAT* v, UINT nr, const D3D12_RECT* rc) { h.ptr = XlatCpu(h.ptr); ((ID3D12GraphicsCommandList*)w->real)->ClearUnorderedAccessViewFloat(g, h, (ID3D12Resource*)Unwrap(r), v, nr, rc); }
 // ---------- обёртки остальных объектов (queue=2, list=3, heap=4) ----------
 static Wrap* g_devWrap = nullptr;
-static inline void* Unwrap(void* p) { uintptr_t u = (uintptr_t)p; return (u >= g_arena_lo && u < g_arena_hi) ? ((Wrap*)p)->real : p; }
-static const int kObjSlots = 192; static const char* kKindName[] = { "?", "device", "queue", "list", "heap", "pso", "allocator", "fence" };
+static const char* kKindName[] = { "?", "device", "queue", "list", "heap", "pso", "allocator", "fence", "resource" };
 static void* g_vtQueue[kObjSlots], *g_vtList[kObjSlots], *g_vtHeap[kObjSlots], *g_vtPso[kObjSlots], *g_vtAlloc[kObjSlots], *g_vtFence[kObjSlots];
 static void* g_originalRootSlots[kObjSlots];
 template<int N> static void __stdcall BootstrapRootSlot(Wrap* w, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d)
@@ -527,7 +596,7 @@ template<int... I> static void InstallBootstrapRootSlots(std::integer_sequence<i
 {
     ((g_originalRootSlots[I+33] = g_vtList[I+33], g_vtList[I+33] = (void*)&BootstrapRootSlot<I+33>), ...);
 }
-static std::atomic<int> g_objCalls[8][kObjSlots];
+static std::atomic<int> g_objCalls[9][kObjSlots];
 template <int K, int N> static uintptr_t __stdcall ObjUnknown(void* self, uintptr_t b, uintptr_t c, uintptr_t d, uintptr_t e, uintptr_t f)
 {
     int n = ++g_objCalls[K][N];
@@ -557,6 +626,32 @@ static HRESULT WrapOutput(HRESULT hr, void** out, void** vt, int kind)
     if (*out) { if (kind == 7) ((Wrap*)*out)->pad[0] = 1; return hr; }
     ((IUnknown*)real)->Release(); // Do not leak the backend's owned reference.
     return E_OUTOFMEMORY;
+}
+
+// ---------- Обёртка ID3D12Resource (kind 8) ----------
+// Xbox UMA: GetGPUVirtualAddress (vtable +0x58) у ресурса == CPU-адрес его памяти; игра пишет в неё процессором (memset, memcpy).
+// VKD3D возвращает VA 0 для текстур (и VA, не являющийся CPU-адресом, для буферов). Как у VIctory (victory-gpu resource.rs `gpu_address`):
+// у текстуры есть CPU-«тень» (память игры), её адрес и отдаётся как GPU VA. Синхронизации тени с PC-текстурой НЕТ (раскладка Xbox — тайлинг,
+// нужен detile): пока тень лишь предотвращает падения; буферы отдают настоящий VA VKD3D.
+struct ResExtra { void* shadow; size_t size; };
+static std::map<void*, ResExtra> g_resShadow;   // wrapper -> тень (под g_resLock)
+static SRWLOCK g_resLock = SRWLOCK_INIT;
+static D3D12_GPU_VIRTUAL_ADDRESS __stdcall Res_GetGPUVirtualAddress(Wrap* w)
+{
+    ID3D12Resource* r = (ID3D12Resource*)w->real; D3D12_RESOURCE_DESC d = r->GetDesc();
+    if (d.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER) return r->GetGPUVirtualAddress();
+    ExclusiveSrwLock held(g_resLock);
+    auto it = g_resShadow.find(w);
+    if (it == g_resShadow.end()) {
+        ID3D12Device* dev = nullptr; r->GetDevice(__uuidof(ID3D12Device), (void**)&dev); size_t sz = 0x10000;
+        if (dev) { D3D12_RESOURCE_ALLOCATION_INFO ai = dev->GetResourceAllocationInfo(0, 1, &d); if (ai.SizeInBytes != ~0ull) sz = (size_t)ai.SizeInBytes; dev->Release(); }
+        if (sz > (1ull << 30)) sz = (size_t)1 << 30;
+        sz = (sz + 0xffff) & ~(size_t)0xffff;
+        void* m = VirtualAlloc(nullptr, sz, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        XS_LOG("RESOURCE %p (%llux%u fmt=%d) GetGPUVirtualAddress -> CPU-тень %p size=%#zx (UMA-эмуляция; синхронизации с PC-текстурой нет)", (void*)w, (unsigned long long)d.Width, d.Height, (int)d.Format, m, sz);
+        it = g_resShadow.emplace(w, ResExtra{m, sz}).first;
+    }
+    return (D3D12_GPU_VIRTUAL_ADDRESS)(uintptr_t)it->second.shadow;
 }
 #include "fence_mirror.h"
 static HRESULT __stdcall QueueSignal14(Wrap* w, ID3D12Fence* fence, UINT64 value)
@@ -591,16 +686,95 @@ static void __stdcall Queue_ExecuteCommandLists(Wrap* w, UINT n, ID3D12CommandLi
     ((ID3D12CommandQueue*)w->real)->ExecuteCommandLists(n, r.data());
     if (BootstrapNoopEnabled()) ++g_bootstrap.execute;
 }
-static HRESULT __stdcall QueuePresent32(Wrap*, UINT planes, const void*, const void*)
+// ---- PresentX -> DXGI swapchain на окне игры ----
+// Plane (по VIctory queue.rs): { u64 token; u32 count; This* resources } — показывается первый ресурс первой плоскости.
+// Окно игры находим сами (EnumWindows по PID), swapchain FLIP_DISCARD x2 на ПЕРВОЙ DIRECT-очереди, в которую пришёл PresentX.
+// Содержимое: копия кадра игры (если тип/размер совместимы) либо цветной тест-паттерн (XSX_PRESENT_PATTERN=1 — всегда паттерн): доказывает работу присента.
+struct PresentState {
+    bool tried = false, ok = false; HWND hwnd = nullptr; IDXGISwapChain3* sc = nullptr; ID3D12CommandQueue* q = nullptr; ID3D12Device* dev = nullptr;
+    ID3D12DescriptorHeap* rtvHeap = nullptr; UINT rtvInc = 0; ID3D12CommandAllocator* alloc[2] = {}; ID3D12GraphicsCommandList* list = nullptr;
+    ID3D12Fence* fence = nullptr; HANDLE ev = nullptr; UINT64 fv = 0; UINT w = 0, h = 0; UINT frame = 0; HRESULT lastHr = S_OK;
+};
+static PresentState g_pr; static SRWLOCK g_prLock = SRWLOCK_INIT;
+static BOOL CALLBACK FindGameWindow(HWND h, LPARAM lp)
+{
+    DWORD pid = 0; GetWindowThreadProcessId(h, &pid); if (pid != GetCurrentProcessId() || !IsWindowVisible(h)) return TRUE;
+    RECT r; GetClientRect(h, &r); long area = (r.right - r.left) * (r.bottom - r.top); HWND* best = (HWND*)lp;
+    RECT rb = {}; if (*best) GetClientRect(*best, &rb); if (area > (rb.right - rb.left) * (rb.bottom - rb.top)) *best = h; return TRUE;
+}
+static bool InitPresent(Wrap* qw)
+{
+    HWND hw = nullptr; EnumWindows(FindGameWindow, (LPARAM)&hw); if (!hw) return false;
+    RECT cr; GetClientRect(hw, &cr); UINT W = cr.right - cr.left, H = cr.bottom - cr.top; if (!W || !H) return false;
+    g_pr.tried = true; g_pr.hwnd = hw; g_pr.w = W; g_pr.h = H;
+    ID3D12CommandQueue* q = (ID3D12CommandQueue*)qw->real; D3D12_COMMAND_QUEUE_DESC qd = q->GetDesc();
+    if (qd.Type != D3D12_COMMAND_LIST_TYPE_DIRECT) { XS_LOG("PRESENT: очередь PresentX не DIRECT (type=%d) — swapchain откладывается", (int)qd.Type); g_pr.tried = false; return false; }
+    q->GetDevice(__uuidof(ID3D12Device), (void**)&g_pr.dev); g_pr.q = q;
+    HMODULE dx = LoadLibraryW(L"dxgi.dll"); typedef HRESULT (WINAPI* CF)(UINT, REFIID, void**); CF cf = (CF)GetProcAddress(dx, "CreateDXGIFactory2");
+    IDXGIFactory2* fac = nullptr; HRESULT hr = cf ? cf(0, __uuidof(IDXGIFactory2), (void**)&fac) : E_FAIL;
+    if (FAILED(hr)) { XS_LOG("PRESENT: CreateDXGIFactory2 hr=0x%08lX", (unsigned long)hr); return false; }
+    DXGI_SWAP_CHAIN_DESC1 d = {}; d.Width = W; d.Height = H; d.Format = DXGI_FORMAT_R8G8B8A8_UNORM; d.SampleDesc.Count = 1; d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    d.BufferCount = 2; d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD; IDXGISwapChain1* sc1 = nullptr;
+    hr = fac->CreateSwapChainForHwnd(q, hw, &d, nullptr, nullptr, &sc1); fac->Release();
+    if (FAILED(hr)) { XS_LOG("PRESENT: CreateSwapChainForHwnd(%ux%u) hr=0x%08lX", W, H, (unsigned long)hr); return false; }
+    sc1->QueryInterface(__uuidof(IDXGISwapChain3), (void**)&g_pr.sc); sc1->Release(); if (!g_pr.sc) return false;
+    D3D12_DESCRIPTOR_HEAP_DESC hd = {}; hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV; hd.NumDescriptors = 2;
+    g_pr.dev->CreateDescriptorHeap(&hd, __uuidof(ID3D12DescriptorHeap), (void**)&g_pr.rtvHeap); g_pr.rtvInc = g_pr.dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    for (int i = 0; i < 2; i++) g_pr.dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), (void**)&g_pr.alloc[i]);
+    g_pr.dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_pr.alloc[0], nullptr, __uuidof(ID3D12GraphicsCommandList), (void**)&g_pr.list); g_pr.list->Close();
+    g_pr.dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void**)&g_pr.fence); g_pr.ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    g_pr.ok = true; XS_LOG("PRESENT: swapchain %ux%u на окне %p (flip-discard x2, R8G8B8A8) создан", W, H, (void*)hw); return true;
+}
+static void PresentFrame(Wrap* qw, ID3D12Resource* src)
+{
+    ExclusiveSrwLock held(g_prLock);
+    if (!g_pr.ok && !g_pr.tried) InitPresent(qw);
+    if (!g_pr.ok) return;
+    UINT bi = g_pr.sc->GetCurrentBackBufferIndex(); ID3D12Resource* bb = nullptr; g_pr.sc->GetBuffer(bi, __uuidof(ID3D12Resource), (void**)&bb); if (!bb) return;
+    D3D12_CPU_DESCRIPTOR_HANDLE h = g_pr.rtvHeap->GetCPUDescriptorHandleForHeapStart(); h.ptr += (SIZE_T)bi * g_pr.rtvInc;
+    g_pr.dev->CreateRenderTargetView(bb, nullptr, h);
+    if (g_pr.fence->GetCompletedValue() < g_pr.fv) { g_pr.fence->SetEventOnCompletion(g_pr.fv, g_pr.ev); WaitForSingleObject(g_pr.ev, 2000); }
+    g_pr.alloc[bi]->Reset(); g_pr.list->Reset(g_pr.alloc[bi], nullptr);
+    D3D12_RESOURCE_BARRIER b = {}; b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b.Transition.pResource = bb; b.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT; b.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    g_pr.list->ResourceBarrier(1, &b);
+    bool copied = false;
+    static bool pattern = [] { char v[4]; return GetEnvironmentVariableA("XSX_PRESENT_PATTERN", v, sizeof v) > 0; }();
+    if (src && g_pr.frame < 3) { D3D12_RESOURCE_DESC sd = src->GetDesc(); XS_LOG("PRESENT: ресурс кадра игры %llux%u fmt=%d dim=%d flags=%#x mips=%u samples=%u", (unsigned long long)sd.Width, sd.Height, (int)sd.Format, (int)sd.Dimension, (unsigned)sd.Flags, sd.MipLevels, sd.SampleDesc.Count); }
+    if (src && !pattern) {   // копия кадра: нужны совпадающие размер и формат (иначе — паттерн)
+        D3D12_RESOURCE_DESC sd = src->GetDesc(), bd = bb->GetDesc();
+        if (sd.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D && sd.Width == bd.Width && sd.Height == bd.Height && sd.Format == bd.Format && sd.SampleDesc.Count == 1) {
+            D3D12_RESOURCE_BARRIER b2 = b; b2.Transition.pResource = src; b2.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON; b2.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+            b.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST; g_pr.list->ResourceBarrier(1, &b); g_pr.list->ResourceBarrier(1, &b2);
+            g_pr.list->CopyResource(bb, src); std::swap(b2.Transition.StateBefore, b2.Transition.StateAfter); g_pr.list->ResourceBarrier(1, &b2);
+            b.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST; b.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT; copied = true;
+        }
+    }
+    if (!copied) {   // тест-паттерн: плавно меняющийся цвет
+        float t = (float)(g_pr.frame % 240) / 240.f; float c[4] = { 0.15f + 0.6f * t, 0.1f + 0.3f * (1 - t), 0.45f, 1.f };
+        g_pr.list->ClearRenderTargetView(h, c, 0, nullptr); b.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET; b.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+    }
+    g_pr.list->ResourceBarrier(1, &b); g_pr.list->Close();
+    ID3D12CommandList* lists[] = { g_pr.list }; g_pr.q->ExecuteCommandLists(1, lists);
+    HRESULT hr = g_pr.sc->Present(0, 0); g_pr.lastHr = hr; g_pr.q->Signal(g_pr.fence, ++g_pr.fv); bb->Release();
+    if (g_pr.frame < 6 || FAILED(hr)) XS_LOG("PRESENT: кадр %u -> %s, Present hr=0x%08lX", g_pr.frame, copied ? "копия кадра игры" : "тест-паттерн", (unsigned long)hr);
+    g_pr.frame++;
+}
+static HRESULT __stdcall QueuePresent32(Wrap* w, UINT planes, const void* a, const void* b2)
 {
     const unsigned count = ++g_bootstrap.present;
+    ID3D12Resource* src = nullptr;
+    if (a && !IsBadReadPtr(a, 24)) { const uint64_t* pl = (const uint64_t*)a; uint32_t cnt = (uint32_t)pl[1]; void* res = (void*)pl[2];
+        if (count <= 3) XS_LOG("PresentX plane[0]: token=%#llx count=%u resources=%p (arg2=%p)", (unsigned long long)pl[0], cnt, res, b2);
+        if (count <= 3 && res && !IsBadReadPtr(res, 32)) { const uint64_t* q = (const uint64_t*)res; XS_LOG("PresentX resources[0..3]=%p %p %p %p arena=[%p,%p)", (void*)q[0], (void*)q[1], (void*)q[2], (void*)q[3], (void*)g_arena_lo, (void*)g_arena_hi); }
+        if (cnt && res && !IsBadReadPtr(res, 8)) { void* r0 = *(void**)res; if (r0) src = (ID3D12Resource*)Unwrap(r0); } }
+    PresentFrame(w, src);
     if (count <= 8 || !(count % 1000)) {
         CALLER(c);
-        XS_LOG("BOOTSTRAP PresentX attempt=%u planes=%u pso=%u set=%u barriers=%u draw=%u dispatch=%u execute=%u native_present=0 noop=%u caller=%s",
+        XS_LOG("BOOTSTRAP PresentX attempt=%u planes=%u pso=%u set=%u barriers=%u draw=%u dispatch=%u execute=%u native_present=%d noop=%u caller=%s",
             count, planes, g_bootstrap.pso.load(), g_bootstrap.set.load(), g_bootstrap.barriers.load(),
-            g_bootstrap.draw.load(), g_bootstrap.dispatch.load(), g_bootstrap.execute.load(), BootstrapNoopEnabled(), c);
+            g_bootstrap.draw.load(), g_bootstrap.dispatch.load(), g_bootstrap.execute.load(), g_pr.ok ? 1 : 0, BootstrapNoopEnabled(), c);
     }
-    return S_OK; // Same unsupported PresentX behavior; do not claim presentation.
+    return S_OK;
 }
 // Game RVA0x24841a6 consumes an output UINT64 as a GPU timestamp frequency.
 // Xbox queue slot18 differs from PC slot18 (GetDesc); call the typed PC API.
@@ -646,7 +820,7 @@ static void __stdcall List_EndQuery53(Wrap* w, ID3D12QueryHeap* heap, D3D12_QUER
 static void __stdcall List_ResolveQuery54(Wrap* w, ID3D12QueryHeap* heap, D3D12_QUERY_TYPE type, UINT start, UINT count, ID3D12Resource* dst, UINT64 offset)
 {
     TraceListQuery(54, __builtin_return_address(0), heap, type, start);
-    ((ID3D12GraphicsCommandList*)w->real)->ResolveQueryData(heap, type, start, count, dst, offset);
+    ((ID3D12GraphicsCommandList*)w->real)->ResolveQueryData(heap, type, start, count, (ID3D12Resource*)Unwrap(dst), offset);
 }
 static void __stdcall List_SetDescriptorHeaps(Wrap* w, UINT n, ID3D12DescriptorHeap* const* heaps)
 {
@@ -682,10 +856,39 @@ static void __stdcall ListDispatch14(Wrap* w, UINT x, UINT y, UINT z)
     }
     ((ID3D12GraphicsCommandList*)w->real)->Dispatch(x, y, z);
 }
+
+// ---- ресурсы в аргументах списка/очереди: обёртки kind 8 -> настоящие объекты ----
+static void __stdcall ListCopyBufferRegion15(Wrap* w, ID3D12Resource* d, UINT64 doff, ID3D12Resource* s, UINT64 soff, UINT64 n)
+{ ((ID3D12GraphicsCommandList*)w->real)->CopyBufferRegion((ID3D12Resource*)Unwrap(d), doff, (ID3D12Resource*)Unwrap(s), soff, n); }
+static void __stdcall ListCopyTextureRegion16(Wrap* w, const D3D12_TEXTURE_COPY_LOCATION* d, UINT x, UINT y, UINT z, const D3D12_TEXTURE_COPY_LOCATION* s, const D3D12_BOX* box)
+{ D3D12_TEXTURE_COPY_LOCATION dd = *d, ss = *s; dd.pResource = (ID3D12Resource*)Unwrap(dd.pResource); ss.pResource = (ID3D12Resource*)Unwrap(ss.pResource);
+  ((ID3D12GraphicsCommandList*)w->real)->CopyTextureRegion(&dd, x, y, z, &ss, box); }
+static void __stdcall ListCopyResource17(Wrap* w, ID3D12Resource* d, ID3D12Resource* s)
+{ ((ID3D12GraphicsCommandList*)w->real)->CopyResource((ID3D12Resource*)Unwrap(d), (ID3D12Resource*)Unwrap(s)); }
+static void __stdcall ListCopyTiles18(Wrap* w, ID3D12Resource* r, const D3D12_TILED_RESOURCE_COORDINATE* c, const D3D12_TILE_REGION_SIZE* sz, ID3D12Resource* b, UINT64 off, D3D12_TILE_COPY_FLAGS f)
+{ ((ID3D12GraphicsCommandList*)w->real)->CopyTiles((ID3D12Resource*)Unwrap(r), c, sz, (ID3D12Resource*)Unwrap(b), off, f); }
+static void __stdcall ListResolveSubresource19(Wrap* w, ID3D12Resource* d, UINT ds, ID3D12Resource* s, UINT ss, DXGI_FORMAT f)
+{ ((ID3D12GraphicsCommandList*)w->real)->ResolveSubresource((ID3D12Resource*)Unwrap(d), ds, (ID3D12Resource*)Unwrap(s), ss, XboxFormatToPc(f)); }
+static void __stdcall ListDiscardResource51(Wrap* w, ID3D12Resource* r, const D3D12_DISCARD_REGION* rg)
+{ ((ID3D12GraphicsCommandList*)w->real)->DiscardResource((ID3D12Resource*)Unwrap(r), rg); }
+static void __stdcall ListSetPredication55(Wrap* w, ID3D12Resource* b, UINT64 off, D3D12_PREDICATION_OP op)
+{ ((ID3D12GraphicsCommandList*)w->real)->SetPredication((ID3D12Resource*)Unwrap(b), off, op); }
+static void __stdcall ListExecuteIndirect59(Wrap* w, ID3D12CommandSignature* sig, UINT mx, ID3D12Resource* a, UINT64 ao, ID3D12Resource* c, UINT64 co)
+{ ((ID3D12GraphicsCommandList*)w->real)->ExecuteIndirect((ID3D12CommandSignature*)Unwrap(sig), mx, (ID3D12Resource*)Unwrap(a), ao, (ID3D12Resource*)Unwrap(c), co); }
+static void __stdcall QueueUpdateTileMappings8(Wrap* w, ID3D12Resource* r, UINT n, const D3D12_TILED_RESOURCE_COORDINATE* sc, const D3D12_TILE_REGION_SIZE* rs, ID3D12Heap* h, UINT nr, const D3D12_TILE_RANGE_FLAGS* rf, const UINT* ho, const UINT* rc, D3D12_TILE_MAPPING_FLAGS f)
+{ ((ID3D12CommandQueue*)w->real)->UpdateTileMappings((ID3D12Resource*)Unwrap(r), n, sc, rs, (ID3D12Heap*)Unwrap(h), nr, rf, ho, rc, f); }
+static void __stdcall QueueCopyTileMappings9(Wrap* w, ID3D12Resource* d, const D3D12_TILED_RESOURCE_COORDINATE* dc, ID3D12Resource* s, const D3D12_TILED_RESOURCE_COORDINATE* sc, const D3D12_TILE_REGION_SIZE* rs, D3D12_TILE_MAPPING_FLAGS f)
+{ ((ID3D12CommandQueue*)w->real)->CopyTileMappings((ID3D12Resource*)Unwrap(d), dc, (ID3D12Resource*)Unwrap(s), sc, rs, f); }
 static void __stdcall ListBarriers26(Wrap* w, UINT count, const D3D12_RESOURCE_BARRIER* barriers)
 {
     if (BootstrapNoopEnabled()) ++g_bootstrap.barriers;
-    ((ID3D12GraphicsCommandList*)w->real)->ResourceBarrier(count, barriers);
+    std::vector<D3D12_RESOURCE_BARRIER> b(barriers, barriers + count);
+    for (auto& x : b) {
+        if (x.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION) x.Transition.pResource = (ID3D12Resource*)Unwrap(x.Transition.pResource);
+        else if (x.Type == D3D12_RESOURCE_BARRIER_TYPE_ALIASING) { x.Aliasing.pResourceBefore = (ID3D12Resource*)Unwrap(x.Aliasing.pResourceBefore); x.Aliasing.pResourceAfter = (ID3D12Resource*)Unwrap(x.Aliasing.pResourceAfter); }
+        else if (x.Type == D3D12_RESOURCE_BARRIER_TYPE_UAV) x.UAV.pResource = (ID3D12Resource*)Unwrap(x.UAV.pResource);
+    }
+    ((ID3D12GraphicsCommandList*)w->real)->ResourceBarrier(count, b.data());
 }
 static void __stdcall ListSlot34(Wrap* w, uintptr_t argument, UINT value, UINT offset)
 {
@@ -757,6 +960,8 @@ static void InitObjVts()
     for (int i = 0; i < 11; i++) g_vtHeap[i] = (void*)fw[i];         // ID3D12DescriptorHeap: 0..10
     for (int i = 0; i < 9; i++) g_vtAlloc[i] = (void*)fw[i]; g_vtAlloc[0] = (void*)Obj_QI; g_vtAlloc[7] = (void*)Obj_GetDevice; g_vtAlloc[9] = (void*)Alloc_Slot9;   // ID3D12CommandAllocator: 0..8; слот 9 — Xbox-расширение
     for (int i = 0; i < 9; i++) g_vtPso[i] = (void*)fw[i]; g_vtPso[0] = (void*)Obj_QI; g_vtPso[7] = (void*)Obj_GetDevice;   // ID3D12PipelineState: 0..8; слоты >=9 — Xbox-расширения (лог)
+    for (int i = 0; i < 15; ++i) g_vtRes[i] = (void*)fw[i];          // ID3D12Resource: 0..14
+    g_vtRes[0] = (void*)Obj_QI; g_vtRes[7] = (void*)Obj_GetDevice; g_vtRes[11] = (void*)Res_GetGPUVirtualAddress;
     for (int i = 0; i < 12; ++i) g_vtFence[i] = (void*)fw[i];
     g_vtFence[0] = (void*)FenceQI; g_vtFence[1] = (void*)FenceAddRef; g_vtFence[2] = (void*)FenceRelease;
     g_vtFence[7] = (void*)Obj_GetDevice; g_vtFence[8] = (void*)FenceCompleted8;
@@ -769,6 +974,9 @@ static void InitObjVts()
     g_vtQueue[32] = (void*)QueuePresent32;
     g_vtList[12] = (void*)ListDraw12; g_vtList[13] = (void*)ListDrawIndexed13;
     g_vtList[14] = (void*)ListDispatch14; g_vtList[26] = (void*)ListBarriers26;
+    g_vtList[15] = (void*)ListCopyBufferRegion15; g_vtList[16] = (void*)ListCopyTextureRegion16; g_vtList[17] = (void*)ListCopyResource17; g_vtList[18] = (void*)ListCopyTiles18;
+    g_vtList[19] = (void*)ListResolveSubresource19; g_vtList[51] = (void*)ListDiscardResource51; g_vtList[55] = (void*)ListSetPredication55; g_vtList[59] = (void*)ListExecuteIndirect59;
+    g_vtQueue[8] = (void*)QueueUpdateTileMappings8; g_vtQueue[9] = (void*)QueueCopyTileMappings9;
     g_vtList[52] = (void*)List_Slot52; g_vtList[53] = (void*)List_EndQuery53; g_vtList[54] = (void*)List_ResolveQuery54;
     g_vtList[34] = (void*)ListSlot34;
     g_vtList[36] = (void*)ListSlot36; g_vtList[40] = (void*)ListSlot40;
@@ -888,6 +1096,10 @@ static HRESULT __stdcall Dev_CreatePlacedResourceX133(Wrap* w, void* addr, const
         hr = real->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &dd, D3D12_RESOURCE_STATE_COMMON, cv, riid, out);
     }
     if (SUCCEEDED(hr) && out && *out && g_placedN < 256) { int i = g_placedN.load(); g_placed[i] = { (uint64_t)addr, dd.Width, *out }; g_placedN.store(i + 1); }
+    if (SUCCEEDED(hr) && out && *out && IsEqualGUID(riid, __uuidof(ID3D12Resource))) {   // как VIctory (Backing::Address): GPU VA ресурса на адресе == адрес памяти игры
+        InitObjVts(); hr = WrapOutput(hr, out, g_vtRes, 8);
+        if (SUCCEEDED(hr)) { ExclusiveSrwLock held(g_resLock); g_resShadow[*out] = ResExtra{addr, 0}; }
+    }
     XS_LOG("DEVICE slot133 CreatePlacedResourceX addr=%p dim=%d width=%#llx state=%#x -> %s hr=0x%08lX res=%p", addr, (int)desc->Dimension, (unsigned long long)desc->Width, state, path, (unsigned long)hr, out ? *out : nullptr);
     return hr;
 }

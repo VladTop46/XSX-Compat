@@ -50,7 +50,7 @@ bw() {
            --setenv WAYLAND_DISPLAY "${WAYLAND_DISPLAY:-wayland-1}")
   fi
   # Передача выбранных XSX_* переменных (только они).
-  for v in $(compgen -e | grep '^XSX_FFX_\|^XSX_VM_\|^XSX_GRAPHICS$\|^XSX_DEV_\|^XSX_DEVICE_\|^XSX_TRAP$\|^XSX_XGR_\|^XSX_DS_\|^XSX_XMEM_'); do args+=(--setenv "$v" "${!v}"); done
+  for v in $(compgen -e | grep '^XSX_FFX_\|^XSX_VM_\|^XSX_GRAPHICS$\|^XSX_DEV_\|^XSX_DEVICE_\|^XSX_TRAP$\|^XSX_XGR_\|^XSX_DS_\|^XSX_XMEM_\|^XSX_THREAD_'); do args+=(--setenv "$v" "${!v}"); done
   exec bwrap "${args[@]}" "$@"
 }
 

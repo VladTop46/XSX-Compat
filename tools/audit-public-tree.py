@@ -12,7 +12,7 @@ import sys
 MANIFEST = 'PUBLIC_SOURCE_MANIFEST.json'
 ROOT_FILES = {'.gitignore', '.gitattributes', 'README.md', 'THIRD_PARTY.md',
               'source-provenance.json', MANIFEST}
-SOURCE_SUFFIXES = {'.cpp', '.h', '.inc', '.def', '.py', '.sh', '.hlsl', '.xml', '.Config'}
+SOURCE_SUFFIXES = {'.c', '.cpp', '.h', '.inc', '.def', '.py', '.sh', '.hlsl', '.xml', '.Config'}
 BLOCKED_PARTS = {'sdk', 'PGDK-extracted', 'game_dlls', 'sandbox', 'drive_c',
                  'dosdevices', '.aws', '.codex', '.agents', '__pycache__',
                  'node_modules', 'build', 'logs'}
@@ -41,6 +41,9 @@ def allowed(path):
     if path.startswith('docs/'):
         return p.suffix == '.md'
     if path == 'tools/audit-public-tree.py':
+        return True
+    if path in {'compat/runtime/xcrdapi/third_party/miniz/LICENSE',
+                'compat/runtime/xcrdapi/third_party/miniz/README.txt'}:
         return True
     # compat/sandbox is source for the isolation scripts, not the root deployment.
     parts = set(p.parts)

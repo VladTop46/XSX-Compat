@@ -43,8 +43,8 @@
     },
     {
       "path": "compat/build-xcrdapi.sh",
-      "source_sha256": "1491a58e58feab632823f30dff9453771c2b75a1b277e8bba54e7286218bffba",
-      "export_sha256": "1491a58e58feab632823f30dff9453771c2b75a1b277e8bba54e7286218bffba",
+      "source_sha256": "1d0d9484ee12b8bf7587dd5a417adfaecded9bab52a60e64053204b9cd1fcb08",
+      "export_sha256": "1d0d9484ee12b8bf7587dd5a417adfaecded9bab52a60e64053204b9cd1fcb08",
       "adjustments": []
     },
     {
@@ -67,8 +67,8 @@
     },
     {
       "path": "compat/d3d12_xs/d3d12_xs.cpp",
-      "source_sha256": "3d19123838f576e2714663fde6d0500e10d524e24da81847433b4afa719c82aa",
-      "export_sha256": "3d19123838f576e2714663fde6d0500e10d524e24da81847433b4afa719c82aa",
+      "source_sha256": "65d5ae20ee0524720422b7cdf5f2335f8916220c616c2c400e684b83eb3fa876",
+      "export_sha256": "65d5ae20ee0524720422b7cdf5f2335f8916220c616c2c400e684b83eb3fa876",
       "adjustments": []
     },
     {
@@ -162,6 +162,38 @@
       "adjustments": []
     },
     {
+      "path": "compat/reports/xmem-alias-v1/phys.h",
+      "development_source": "compat/runtime/xmem/phys.h",
+      "source_sha256": "636a94756477f614fd68075ca369e4ef53e6600e3003b436bba16bab6d035b23",
+      "export_sha256": "636a94756477f614fd68075ca369e4ef53e6600e3003b436bba16bab6d035b23",
+      "adjustments": [],
+      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
+    },
+    {
+      "path": "compat/reports/xmem-alias-v1/xmem-alias-test.cpp",
+      "development_source": "compat/tests/xmem-alias-test.cpp",
+      "source_sha256": "5bcb58542d86a9b7b73c3eb208a7924c31f0c2d05873c4658423c5096b9f3ff7",
+      "export_sha256": "5bcb58542d86a9b7b73c3eb208a7924c31f0c2d05873c4658423c5096b9f3ff7",
+      "adjustments": [],
+      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
+    },
+    {
+      "path": "compat/reports/xmem-alias-v1/xmem.cpp",
+      "development_source": "compat/runtime/xmem/xmem.cpp",
+      "source_sha256": "839764f4db5ae6996a3e6687aab1a30dd43f4ba1cdad30c80d6e2619dff7251a",
+      "export_sha256": "839764f4db5ae6996a3e6687aab1a30dd43f4ba1cdad30c80d6e2619dff7251a",
+      "adjustments": [],
+      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
+    },
+    {
+      "path": "compat/reports/xmem-alias-v1/xmem.def",
+      "development_source": "compat/runtime/xmem/xmem.def",
+      "source_sha256": "1fb9e55db0fba07eeebebedbbb4f155c18eea45ce8fa20dc577381812bbe0a76",
+      "export_sha256": "1fb9e55db0fba07eeebebedbbb4f155c18eea45ce8fa20dc577381812bbe0a76",
+      "adjustments": [],
+      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
+    },
+    {
       "path": "compat/run-services-probes.sh",
       "source_sha256": "a95f5c68855bb294d1ba55b65cabcfaa1ecba9ae78638879f1ad57d7faa16a90",
       "export_sha256": "a95f5c68855bb294d1ba55b65cabcfaa1ecba9ae78638879f1ad57d7faa16a90",
@@ -175,8 +207,8 @@
     },
     {
       "path": "compat/runtime/audio/acphal.cpp",
-      "source_sha256": "43c3ebee9f9c47b19913e3d3ee4284701fac4fef23902797556122c8b9cbb6e6",
-      "export_sha256": "43c3ebee9f9c47b19913e3d3ee4284701fac4fef23902797556122c8b9cbb6e6",
+      "source_sha256": "edc378194aacae5c67778755d6dcf49c05e3ef0328186a57d4d885fdeb2b3130",
+      "export_sha256": "edc378194aacae5c67778755d6dcf49c05e3ef0328186a57d4d885fdeb2b3130",
       "adjustments": []
     },
     {
@@ -216,9 +248,30 @@
       "adjustments": []
     },
     {
+      "path": "compat/runtime/xcrdapi/third_party/miniz/README.txt",
+      "source_sha256": "d6f91a3f53e2c933518a11e0b7e3d04c0a2e18e6bd1097ae0e8bce499bb670d7",
+      "export_sha256": "d6f91a3f53e2c933518a11e0b7e3d04c0a2e18e6bd1097ae0e8bce499bb670d7",
+      "adjustments": [],
+      "origin": "miniz source from the local esptool flasher_stub copy; embedded copyright/permission retained"
+    },
+    {
+      "path": "compat/runtime/xcrdapi/third_party/miniz/miniz.c",
+      "source_sha256": "bd2a5ae69adc3bc7d73fa37bf65dbabe84846758446a26009a827ff5d69a9c9c",
+      "export_sha256": "bd2a5ae69adc3bc7d73fa37bf65dbabe84846758446a26009a827ff5d69a9c9c",
+      "adjustments": [],
+      "origin": "miniz source from the local esptool flasher_stub copy; embedded copyright/permission retained"
+    },
+    {
+      "path": "compat/runtime/xcrdapi/third_party/miniz/miniz.h",
+      "source_sha256": "c302824a332fa49dd7f6065d39dac9a86d52031058c949a66aed67ff4e60e059",
+      "export_sha256": "c302824a332fa49dd7f6065d39dac9a86d52031058c949a66aed67ff4e60e059",
+      "adjustments": [],
+      "origin": "miniz source from the local esptool flasher_stub copy; embedded copyright/permission retained"
+    },
+    {
       "path": "compat/runtime/xcrdapi/xcrdapi.cpp",
-      "source_sha256": "ee799a75233e7b1569bfd74ac5e3895ebe54ec72c98931b23111601f863f01b3",
-      "export_sha256": "ee799a75233e7b1569bfd74ac5e3895ebe54ec72c98931b23111601f863f01b3",
+      "source_sha256": "45199f0e8fc8979ebfe16f49e4c913105e7033f40ceb5f8af72b391bf88bcc7b",
+      "export_sha256": "45199f0e8fc8979ebfe16f49e4c913105e7033f40ceb5f8af72b391bf88bcc7b",
       "adjustments": []
     },
     {
@@ -253,14 +306,14 @@
     },
     {
       "path": "compat/runtime/xmem/phys.h",
-      "source_sha256": "49337cf0fac83489e5e3d6afb024c5c54a4cd53c07f2c55096f7d3593174a244",
-      "export_sha256": "49337cf0fac83489e5e3d6afb024c5c54a4cd53c07f2c55096f7d3593174a244",
+      "source_sha256": "e741ef6ca9a6e1e825c0f74311e82611bf406eec4ec691eb94c9934bfeede83f",
+      "export_sha256": "e741ef6ca9a6e1e825c0f74311e82611bf406eec4ec691eb94c9934bfeede83f",
       "adjustments": []
     },
     {
       "path": "compat/runtime/xmem/xmem.cpp",
-      "source_sha256": "a4895829fea6072a5df0f4afbed2630849e20f3b6c3f7be7e1ebdf2619aa64f9",
-      "export_sha256": "a4895829fea6072a5df0f4afbed2630849e20f3b6c3f7be7e1ebdf2619aa64f9",
+      "source_sha256": "e11c2ba01e7a23919ba2d86f6f1031d7b76c5c78d8c4d267edb4641f632e7349",
+      "export_sha256": "e11c2ba01e7a23919ba2d86f6f1031d7b76c5c78d8c4d267edb4641f632e7349",
       "adjustments": []
     },
     {
@@ -295,8 +348,8 @@
     },
     {
       "path": "compat/sandbox/xsx-sandbox.sh",
-      "source_sha256": "16042c4a272cc90be23c70f7c7a21c30781db1a7e35cf1b8b22dade7ef707c02",
-      "export_sha256": "16042c4a272cc90be23c70f7c7a21c30781db1a7e35cf1b8b22dade7ef707c02",
+      "source_sha256": "b92e19477501463dc52eb036d4a9078af6a250f45db3a79eaba33c47949dc157",
+      "export_sha256": "b92e19477501463dc52eb036d4a9078af6a250f45db3a79eaba33c47949dc157",
       "adjustments": []
     },
     {
@@ -525,8 +578,8 @@
     },
     {
       "path": "compat/tests/xmem-alias-test.cpp",
-      "source_sha256": "5bcb58542d86a9b7b73c3eb208a7924c31f0c2d05873c4658423c5096b9f3ff7",
-      "export_sha256": "5bcb58542d86a9b7b73c3eb208a7924c31f0c2d05873c4658423c5096b9f3ff7",
+      "source_sha256": "faef9a082da06a248ad66fd5640d2ae69b98a5a4cc93b8e6999cde57733f8952",
+      "export_sha256": "faef9a082da06a248ad66fd5640d2ae69b98a5a4cc93b8e6999cde57733f8952",
       "adjustments": []
     },
     {
@@ -744,39 +797,7 @@
       "source_sha256": "b3aa035af4fe721190c5aaa2eeec3fbad1e6423e32566010c365b09e1400b3d9",
       "export_sha256": "b3aa035af4fe721190c5aaa2eeec3fbad1e6423e32566010c365b09e1400b3d9",
       "adjustments": []
-    },
-    {
-      "path": "compat/reports/xmem-alias-v1/phys.h",
-      "development_source": "compat/runtime/xmem/phys.h",
-      "source_sha256": "636a94756477f614fd68075ca369e4ef53e6600e3003b436bba16bab6d035b23",
-      "export_sha256": "636a94756477f614fd68075ca369e4ef53e6600e3003b436bba16bab6d035b23",
-      "adjustments": [],
-      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
-    },
-    {
-      "path": "compat/reports/xmem-alias-v1/xmem.cpp",
-      "development_source": "compat/runtime/xmem/xmem.cpp",
-      "source_sha256": "839764f4db5ae6996a3e6687aab1a30dd43f4ba1cdad30c80d6e2619dff7251a",
-      "export_sha256": "839764f4db5ae6996a3e6687aab1a30dd43f4ba1cdad30c80d6e2619dff7251a",
-      "adjustments": [],
-      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
-    },
-    {
-      "path": "compat/reports/xmem-alias-v1/xmem.def",
-      "development_source": "compat/runtime/xmem/xmem.def",
-      "source_sha256": "1fb9e55db0fba07eeebebedbbb4f155c18eea45ce8fa20dc577381812bbe0a76",
-      "export_sha256": "1fb9e55db0fba07eeebebedbbb4f155c18eea45ce8fa20dc577381812bbe0a76",
-      "adjustments": [],
-      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
-    },
-    {
-      "path": "compat/reports/xmem-alias-v1/xmem-alias-test.cpp",
-      "development_source": "compat/tests/xmem-alias-test.cpp",
-      "source_sha256": "5bcb58542d86a9b7b73c3eb208a7924c31f0c2d05873c4658423c5096b9f3ff7",
-      "export_sha256": "5bcb58542d86a9b7b73c3eb208a7924c31f0c2d05873c4658423c5096b9f3ff7",
-      "adjustments": [],
-      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
     }
   ],
-  "snapshot_note": "Includes grouped-scatter v2 changes and report correction observed during export; a frozen source copy, not a live mirror of ongoing development."
+  "snapshot_note": "Game Running / frame 82 checkpoint: PFN page IDs, DStorage status generations and worker pool, resource CPU shadows, AcpHal completion queue, and DXGI diagnostic presentation; runtime evidence and game payloads remain private."
 }

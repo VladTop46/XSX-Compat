@@ -6,7 +6,7 @@ XSX-Compat is an experimental compatibility layer for running native Xbox Series
 
 The project started with small runtime and graphics experiments, then progressed through native Xbox FidelityFX initialization, shader-container research, and the startup of a real game executable. The current main research target is **GTA VI**, using the Xbox Series executable `game_scarlett_master.exe`.
 
-**Current milestone: early game initialization and an instrumented graphics submission loop. A rendered GTA VI frame, working menu, and playable gameplay have not been demonstrated.**
+**Current milestone: Game Init passed. The game reports Game Running, Frame 82. Native DXGI presentation of a diagnostic test pattern also succeeds. A correctly rendered GTA VI frame, working menu, and gameplay remain unverified.**
 
 **Status snapshot: November 24, 2026.** Development is active; individual experiments and shared development builds can differ from the frozen builds used for the results below.
 
@@ -53,20 +53,20 @@ GTA VI provides a demanding concrete target, while smaller standalone probes mak
 
 | Area | Current result | Important remaining work |
 |---|---|---|
-| Native executable startup | The target executable loads and executes substantial initialization code under Wine | Reliable startup through every required subsystem |
+| Native executable startup | **Game Running, Frame 82** recorded after passing Game Init | Resolve the current linear-buffer assertion and sustain execution |
 | Imports and runtime | Import auditing, native CRT dependencies, GameRuntime initialization, and configuration handling have been exercised | Complete behavior of the imported services |
 | Xbox D3D12 ABI | Device, queue, list, allocator, heap, and fence adaptations; real PC D3D12 work passes GPU probes | Remaining Xbox contracts and general interface coverage |
 | GPU bootstrap | **62 checks passed, 0 failed** in a frozen standalone build | End-to-end integration with the complete game renderer |
 | Native game shaders | Two selected programs translated and executed through real PC PSOs | General ISA coverage, pixel/mesh shaders, resource ABI, and game PSO integration |
 | Shader-container analysis | **26,503 containers validated**, containing **26,698 native variants** in the scanned shader archive | Complete archive enumeration and broader translation |
 | Diagnostic game rendering path | Thousands of valid synthetic PSOs, recorded draws, submissions, and repeated PresentX attempts appear in game logs | Actual game shaders, resource contents, and native presentation |
-| GPU memory | Shared-section page backend; earlier alias contract passed **13/13**; grouped-scatter interpretation added | Validate the revised ABI, GPU visibility, fallback regions, and placed-resource identity |
+| GPU memory | PFN-based shared page mappings pass **16/16**; texture CPU-shadow wrappers prevent null-address writes | Shadow/GPU synchronization, detiling, descriptors, and placed-resource identity |
 | Texture layout | Linear layout/copy prototype | Xbox swizzle, complete layout ABI, and correct texture contents |
-| Storage | File/memory requests, zlib decompression, queue/status/error handling | BCpack, GPU/physical destinations, and full streaming semantics |
+| Storage | Status generations fix stale completion; miniz decompression and worker pool; **20/20** recorded checks | BCpack, GPU/physical destinations, and full streaming semantics |
 | Input | GameInput object and no-device initialization path | Actual controller, keyboard, mouse, and callback delivery |
-| Audio | Tested APU memory/address translation; later diagnostic AcpHal channel object | Functional SHAPE commands, DSP/codec processing, and sound output |
+| Audio | AcpHal command/message FIFO releases the initialization wait | Actual SHAPE/DSP/codec execution and sound output |
 | Networking | Original HTTP libraries pass **139 loopback checks**, with cleanup | Game integration, remote transport, authentication, and online services |
-| Presentation | PresentX requests and provisional frame tokens/pacing | Native presentation and complete frame statistics |
+| Presentation | DXGI swapchain created; diagnostic test-pattern Present returns **S_OK** | Correct game-resource presentation, frame statistics, and lifecycle |
 | GTA VI gameplay | **Not demonstrated** | First correct game frame, menu, input/audio, and sustained execution |
 
 These are subsystem results with different scopes. They should not be added together into a game compatibility percentage.
@@ -99,7 +99,7 @@ flowchart TD
     Wine --> Linux
 ```
 
-The diagram describes the intended architecture. The game's Xbox presentation bridge and several service backends are still incomplete.
+The diagram describes the intended architecture. A diagnostic Xbox-to-DXGI presentation bridge now runs; correct game pixels and several service backends remain incomplete.
 
 The current execution model is a user-mode compatibility environment. Early GameOS/XVD and XVC experiments helped characterize the platform, but the working development path uses Wine and API adaptation rather than booting the console operating system.
 
@@ -206,50 +206,38 @@ Unknown calls are collected into a common slot/caller registry. They are investi
 
 An explicit diagnostic mode supplies valid synthetic graphics/compute PSOs. It lets the game progress through command recording and submission while native game-shader translation remains under development.
 
-### 10. Preserving physical-page identity and reaching effect loading
+### 10. Passing Game Init
 
-The next investigation separated a missing PC GameRuntime XPackage service from corrupt-looking archive data. A local GameRuntime proxy added a diagnostic package/content provider. Storage capture comparisons independently confirmed that the tested DirectStorage zlib requests decompressed correctly.
+Two memory/I/O corrections removed earlier misleading data failures. Physical page identifiers are PFNs in 4 KiB units, with a step of 16 for each 64 KiB backing page; the temporary grouped-scatter heuristic was removed. DirectStorage status slots now reset on enqueue and use generations, preventing a reused slot from reporting a previous batch as complete before new data arrives.
 
-The critical memory mismatch was physical-page aliasing: the game maps the same page identifiers at multiple virtual addresses, including repeated mappings of a zero tile. Independently committed pages did not preserve that identity. A shared-section/placeholder backend now makes supported mappings refer to the same backing memory.
+Texture resource wrappers then supplied CPU-accessible shadows for the observed Xbox UMA address contract. Finally, AcpHal gained a command/message FIFO: its `COMMAND_COMPLETED` response released FMOD's initialization wait and the game's job-system barrier.
 
-A Wine probe passed **13/13** alias/remap/unmap checks for the first implementation. An initial interpretation of the game scatter array was then corrected: repeated entries on the observed game path describe groups of physical pages, rather than thousands of identical single-page aliases. With the revised mapping, the `im` effect creates **48/48 program objects** and its null-program crash disappears.
-
-The early conclusion that aliasing had fixed `setup2` and truncated serialized data was withdrawn: the first version merely crashed before those checks. The latest runs reach those failures again. Investigation now follows the game's archive read/cache path. The source publication preserves the earlier 13-check version separately from the later grouped-scatter experiment.
+The resulting crash report records **Game Running, Frame 82**, beyond the previous Game Init / Frame 0 boundary. A separate diagnostic presentation path creates a native DXGI swapchain and presents a generated test pattern successfully. The current stop is a linear-buffer capacity assertion; shader/resource correctness and a real game image are still open.
 
 ## GTA VI: the current startup stage
 
-The current result is **real game startup reaching renderer activity**, with important operations still implemented as bootstrap fallbacks.
-
-| Startup stage | Observed behavior | Scope |
-|---|---|---|
-| PE loading | The executable and dependencies load sufficiently to execute game initialization | Working startup path; not a complete replacement for all platform services |
-| Runtime initialization | GameRuntime, configuration, and a diagnostic XPackage provider are reached | PC runtime forwarding plus provisional local package/content metadata |
-| Memory setup | Console VM setup, XMem pools, shared physical-page mappings, and scatter aliases are reached | Aliasing implemented for tracked placeholder reservations; GPU-resource sharing remains incomplete |
-| Input setup | GameInput creation and callback registration are reached | No actual input devices are supplied by the current shim |
-| Data access | RPF9 archives open; tested storage inflate results match zlib; aliasing fixes advance content loading | Complete streaming semantics and resource destinations remain open |
-| Graphics setup | Device creation, root signatures, resource allocations, queues, and lists are reached | Adapted PC backing objects and partial Xbox contracts |
-| PSO/bootstrap rendering | Diagnostic builds create synthetic PSOs and record draws/submissions | Original game shaders are not executed by these synthetic PSOs |
-| Presentation request | PresentX requests and provisional WaitFrameEventX tokens are observed | Native presentation remains unimplemented; statistics are synthetic |
-| Effect / pipeline setup | Revised scatter mapping permits 48/48 `im` program objects; the observed null-program crash disappears | Program creation is not proof of translated shaders or correct rendering |
-| Current data boundary | `setup2` / serialized-data checks fail again after the scatter correction | Archive read/cache path under investigation; Frame 0 |
-| Game frame/menu | Crash reports still record **Game Init / Frame 0** | No verified rendered game frame or menu |
-| Gameplay | Not demonstrated | Future milestone |
-
-One recorded diagnostic game run reported:
+**Game Init has been passed.** The recorded game crash report now contains:
 
 ```text
-BOOTSTRAP PresentX attempt=8 planes=1 pso=10241 set=22 barriers=0 draw=22 dispatch=0 execute=8 native_present=0 noop=1
+Game State: Game Running
+Frame: 82
 ```
 
-This is evidence of substantial initialization and repeated graphics-path activity. The counters describe that particular instrumented run. They do not measure rendering correctness, and they do not imply that every stage was exercised: for example, that excerpt records no Dispatch calls.
+| Stage | Observed result | Scope |
+|---|---|---|
+| Executable/runtime | Game initialization runs under Wine with the local compatibility DLLs | Partial Xbox service coverage |
+| Data access | Reused DStorage status slots wait for the current batch; earlier `setup2` / truncated-data assertions are cleared | Unsupported streaming formats remain |
+| Physical memory | PFN identifiers, shared aliases, scatter, and fragmented-placeholder remapping; 16/16 probe checks | CPU aliasing, not complete GPU memory coherence |
+| Resource creation | Xbox format normalization and texture CPU shadows | No shadow-to-GPU synchronization or detiling yet |
+| Audio initialization | AcpHal completes command 2 (`REGISTER_MESSAGES`) through its FIFO | Releases the startup wait; no decoded/mixed sound |
+| Game state | **Game Running, Frame 82** | Internal game state/frame counter |
+| Presentation | Native DXGI swapchain and test-pattern Present return `S_OK` | Generated diagnostic surface |
+| Current stop | Assertion at executable RVA `0x4dcbc9d`: linear buffer has `0x50` bytes left for a `0x6c0` request | Allocator/upload capacity contract still under investigation |
+| Game image/menu/gameplay | Unverified | Native game shaders, data, and resource bindings remain incomplete |
 
-`native_present=0` explicitly means that a PresentX request was counted without a native displayed-frame implementation. A window surviving longer, repeated PresentX calls, or a successful synthetic GPU workload is not treated as a rendered GTA VI frame.
+The latest inspected presentation log records a 1924 × 1058 flip-discard swapchain, repeated test-pattern frames, `Present hr=0x00000000`, and `native_present=1` with `noop=1`. The game-state result and diagnostic presentation are separate milestones: the counter reaching frame 82 does not establish 82 correctly rendered game images.
 
-An intermediate shared-page build faulted at `game_scarlett_master.exe+0xb5a5f8`, reading through a null effect-program pointer. The latest investigation attributes that regression to an incorrect scatter-page interpretation: shader buffers overwrote each other. The revised group-based mapping permits 48/48 `im` program objects and avoids that failure.
-
-The latest checkpoint instead returns to initialization assertions around `+0x1dac734` and `+0x9dfc18` with inconsistent serialized-file contents. In the inspected trace, archive reads do not show a disk read for the expected `setup2` content block. A stale cache/buffer, offset calculation, or asynchronous read-completion problem is being investigated; the precise cause is not established. This concerns the game's internal RPF path, while the tested DirectStorage zlib path remains a separate passing result.
-
-Different development checkpoints have exited with codes 3 or 5. Earlier failures must be distinguished from the current one; neither this crash nor its eventual repair will establish complete rendering compatibility. See [the current checkpoint](docs/STATUS.md).
+Current game bring-up uses `XSX_DEV_NOOP_PSO=1`. The earlier log with 10,241 synthetic PSOs, 22 draws, eight submissions, and `native_present=0` is historical; it no longer describes the available presentation implementation.
 
 ## Technical implementation
 
@@ -272,17 +260,13 @@ The current tables are based on the interfaces and binaries observed during this
 
 ### Resources, heaps, and descriptors
 
-The resource path creates actual PC D3D12 resources and preserves their native identities. The same resource-description normalization is used for selected allocation queries and creation paths, so sizing and backing-resource decisions remain consistent.
+The adapter creates real PC D3D12 resources while keeping their native VKD3D virtual tables intact. Guest-facing resource wrappers now adapt the Xbox UMA address contract; resources are unwrapped at native view, copy, barrier, clear, query, and indirect-execution boundaries.
 
-Implemented adaptations include selected Xbox flag removal, an experimental layout conversion, CPU descriptor-handle translation for guest-provided heap ranges, and a narrowly scoped depth-only fallback for an observed Xbox depth/UAV allocation.
+For textures, `GetGPUVirtualAddress` returns CPU-accessible memory: the supplied placement address or an allocated shadow for the observed committed path. This prevents the game's CPU initialization from writing through the zero texture VA returned by PC D3D12. Buffers currently retain the native GPU address.
 
-Important limits remain:
+Resource/allocation queries share Xbox flag/layout normalization. Console-specific format fallbacks include depth/stencil 118/119/120 and selected packed-color values. Depth+UAV requests use depth backing with UAV removed; this does not implement equivalent depth-UAV access.
 
-- The depth fallback does not implement a synchronized UAV shadow of the depth surface.
-- A committed-resource fallback does not make the resource share the game's original CPU/GPU memory.
-- Xbox raw descriptors written directly into guest memory are not fully translated into PC descriptors.
-- The game's virtual buffer addresses are not generally registered as valid native GPU buffer addresses.
-- Heap creation and successful allocation queries do not establish correct resource contents.
+Remaining limits include shadow-to-GPU synchronization, detiling, guest buffer-address translation, raw descriptors, correct resource placement, and lifetime management of the provisional shadows. Successful allocation and CPU writes do not establish correct GPU contents.
 
 ### Command recording and synchronization
 
@@ -308,7 +292,7 @@ In this mode:
 - Guest root bindings covered by the diagnostic bypass are suppressed because the synthetic root layout is empty.
 - Topology is normalized for the synthetic graphics workload only.
 - Resource barriers and submissions continue through native PC APIs.
-- PresentX reports aggregate counters and explicitly records `native_present=0`.
+- PresentX reports aggregate counters; the native presentation path can display a synthetic test pattern independently of game shader execution.
 
 This mode has passed a standalone GPU test covering PSO creation, reference handling, Draw, Dispatch, resource transition/copy, submission, native fence completion, and a 64-byte guard.
 
@@ -316,17 +300,13 @@ It is a tool for advancing startup and locating the next dependency. It does not
 
 ### Xbox memory: XMem
 
-`compat/runtime/xmem/` implements aligned allocation/free, virtual-memory operations, and the observed physical-page API surface.
+`compat/runtime/xmem/` implements aligned allocation/free, virtual-memory operations, and the observed physical-page APIs.
 
-The physical-page backend in `phys.h` maps 64 KiB page identifiers to offsets in one 16 GiB pagefile-backed section. Selected physical reservations use placeholders. Map/Scatter operations split and replace placeholders with section views, so multiple supported virtual mappings of the same identifier share their contents. Remapping preserves unaffected view tails, and unmapping restores placeholders.
+Page identifiers now use the Xbox PFN representation: the first identifier is `0x100000`, with a step of 16 per 64 KiB page. This preserves identities when the game stores `id >> 4` and restores it with `<< 4`. The intermediate grouped-scatter interpretation was an artifact of the old consecutive identifiers and has been removed; Scatter uses the supplied PFN literally.
 
-The first standalone aliasing contract passed **13/13** checks, covering writes through multiple addresses, scatter aliases, middle-of-view remapping, and unmap preservation. That source is preserved under `compat/reports/xmem-alias-v1/`.
+`phys.h` maps identifiers to offsets in a shared 16 GiB pagefile-backed section. Physical reservations use placeholders; map/unmap operations replace views while preserving unaffected tails. Fragmented placeholder ranges can be remapped page by page. The updated Wine probe records **16/16** checks, including PFN spacing, scatter aliases, partial remap, unmap, and remapping a fragmented range.
 
-The current source subsequently changed the observed game Scatter interpretation: equal identifiers along consecutive virtual pages describe a group with a page offset, including the incomplete initial group. This revision fixes the observed `im` shader-buffer collision. Its grouped-page ABI is **not covered by the earlier 13/13 probe**, whose repeated-ID test assumes individual-page semantics. The optional `XSX_XMEM_DUP_PRIVATE` diagnostic mode can replace heavily repeated identifiers with independent private pages; that deliberately loses sharing and is disabled by default.
-
-Addresses outside tracked placeholder reservations still use private-memory fallbacks; those mappings do not gain aliasing automatically. Page identifier reuse/free accounting and complete allocation/cache policies remain incomplete. CPU aliasing does not establish that committed PC D3D12 fallbacks see the same memory. `XSX_XMEM_ALIAS=0` selects the older fallback in the library. The sandbox now forwards the `XSX_XMEM_*` controls.
-
-Console allocation attributes, page policies, cache behavior, and CPU/GPU visibility still need a fuller model. Some exports remain unsupported or provisional.
+Addresses outside tracked reservations still have fallback semantics. Identifier lifetime, allocation/cache policies, and guest/GPU resource coherence remain incomplete. `XSX_XMEM_ALIAS=0` selects the older private-memory fallback. The preserved `xmem-alias-v1/` source is historical and retains its earlier 13-check contract.
 
 ### DirectStorage-style I/O
 
@@ -336,14 +316,17 @@ The implementation includes:
 
 - File opening and offset-based file-to-memory reads.
 - Memory-to-memory requests.
-- Worker-backed request submission.
+- Worker-pool request submission, with status/fence barriers after preceding requests.
+- Reusable status slots reset on enqueue and checked against a completion generation.
 - zlib decompression.
 - Status completion and error reporting.
 - Cancellation-tag handling and fence-signal entries.
 
 The game's factory/request ABI differs from the initially consulted wrapper sample, so the implementation uses layouts recovered from actual game calls.
 
-Bounded `XSX_DS_DUMP` captures support comparison of compressed input and decompressed output. The current engineering checkpoint reports **200 game zlib requests** compared byte for byte with reference zlib, without mismatches. These captures remain private; the publication includes the implementation, not the captured contents.
+A stale-completion bug caused the game to parse destination buffers before the new batch had written them. Resetting a reused status slot on enqueue, then completing only its current generation, removes the earlier `setup2` and truncated serialized-data failures.
+
+The fast decompression path uses bundled miniz/tinfl, retaining the earlier inflater as fallback. `XSX_DS_THREADS` controls the worker count; status and signal entries wait for preceding requests. The storage checkpoint records **20/20** checks. Earlier bounded captures compared 200 game zlib requests byte for byte with reference zlib. Captured contents remain private.
 
 BCpack, swizzled requests, and physical-page source/destination semantics remain unsupported. Real game streaming is only partially covered by the current backend.
 
@@ -361,15 +344,13 @@ Actual device enumeration, input sampling, callback delivery, and gameplay contr
 
 ### Audio and APU services
 
-`compat/runtime/audio/` implements a CPU-backed APU memory model with a separate 32-bit APU address space, checked alignment/ranges, allocation/free validation, and CPU-to-APU/APU-to-CPU translation.
+`compat/runtime/audio/` implements a CPU-backed APU address space with checked alignment/ranges, allocation/free validation, address translation, and the observed SHAPE context-array allocation.
 
-The observed game ABI differs from older reference signatures. In particular, the game's APU-address lookup takes a CPU pointer and returns a 32-bit address directly. The implementation follows the actual caller.
+AcpHal now exposes `connect`, `disconnect`, `submit`, `pop_message`, `message_count`, and `release`. It maintains a bounded FIFO of packed 28-byte messages, registration masks, completion timestamps, and APU notification writes. Commands complete immediately in this bootstrap implementation; flowgraph requests can also generate completion messages.
 
-The observed SHAPE context array can also be allocated. The recorded 19-check Wine probe used the earlier implementation where `AcpHalCreate` returned `E_NOTIMPL` with a null output. The current development source has since changed to a **diagnostic 32-slot object** whose methods log and return `S_OK`, allowing investigation beyond an audio-initialization assertion. This object does not process SHAPE commands or messages.
+The earlier all-success dummy object never delivered a completion. FMOD waited for `COMMAND_COMPLETED` after `REGISTER_MESSAGES`, holding an audio/job-system startup barrier. Delivering that message allows the game to reach **Game Running, Frame 82**.
 
-That source change is not covered by the earlier 19-check result. The historical probe still expects the explicit unsupported result; running it against the later dummy-object build requires recognizing that contract difference. The separate memory-backend tests remain relevant to allocation/mapping, not sound output.
-
-SHAPE processing, DSP behavior, codec integration, audio scheduling, and output remain open work. `chad`/XDsp and `xapu` still have bootstrap stubs. Bink/XAudio integration is a separate path and has not established working game sound or video playback.
+This implements command transport needed for startup. SHAPE graph execution, XMA/Opus decoding, DSP/mixing, scheduling fidelity, and PCM output remain absent. The earlier 19-check Wine memory probe used the old explicit-unsupported channel contract and does not validate this new object. The independent APU memory-backend tests retain their narrower scope.
 
 ### Networking and runtime services
 
@@ -387,13 +368,13 @@ HTTPS verification, external endpoints, authentication, Xbox account/store/save 
 
 The provider supplies provisional package identifiers, content enumeration, install-monitor progress, locale, and chunk availability. `XSX_XGR_CONTENT` selects the diagnostic content list; deployment can bypass the proxy with `XSX_XGR_PROXY=0`. Package metadata and progress are synthetic. Mount/install behavior, persistent storage, user/store services, and a general package manager are incomplete.
 
-This helped trace content initialization but did not independently repair the serialized-data failures. Those failures still occur after correcting the scatter mapping; their archive read/cache path remains under investigation.
+This helped trace content initialization. The serialized-data failures were subsequently traced to reused DStorage status slots; package metadata was not the repair for that race.
 
 ### Frame lifecycle
 
 Device slot 80 now supplies monotonically increasing frame tokens with approximate 60 Hz pacing. Slot 81 is identified as `GetFrameStatisticsX` from sample usage, but its current implementation still writes provisional synthetic data and retains an outdated queue-info comment. Correct statistics and complete event/timeout semantics remain open.
 
-Queue PresentX continues to count requests with `native_present=0`. These frame-lifecycle adaptations do not create a native swapchain or display game pixels.
+Queue PresentX now has a DXGI bridge: it finds the game window, creates a two-buffer flip-discard swapchain on a direct queue, and submits/presents a diagnostic surface. It attempts a source-resource copy only for compatible dimensions/formats; otherwise it clears a generated test pattern. `XSX_PRESENT_PATTERN=1` forces that pattern. The inspected log records repeated `Present S_OK`; correct game-resource presentation and full frame lifecycle remain open.
 
 ### Isolated game execution
 
@@ -524,12 +505,14 @@ The project uses separate tests for host parsing, ABI behavior, GPU correctness,
 | Graphics ABI regression | **62 passed / 0 failed** | The frozen probe covers adapted calls, real rendering/readback, synchronization, and synthetic bootstrap PSOs |
 | Wrapper concurrency regression | 32,768 unique wrappers created across 8 threads | The tested concurrent allocation and reference-lifetime paths survive arena commit boundaries |
 | APU host memory tests | 70 checks and 4,000 threaded allocations; live allocations 0 | CPU/APU allocation, mapping, bounds, and lifetime behavior under the tested conditions |
-| APU Wine probe | 19 checks, exit 0, on the earlier explicit-unsupported channel build | Observed allocation/address ABI and context memory; not the later dummy channel object |
-| XMem aliasing probe | **13/13** checks in Wine on the first version | Earlier individual-page contract; later grouped-scatter revision requires its own validation |
+| APU Wine probe | 19 checks, exit 0, on the earlier explicit-unsupported channel build | Observed allocation/address ABI and context memory; not the later command/message object |
+| XMem PFN/aliasing probe | **16/16** checks in the current checkpoint | PFN spacing, literal scatter identifiers, shared writes, partial/unmap, and fragmented-placeholder remap |
+| Storage probe | **20/20** checks in the current checkpoint | Tested file/memory/zlib and queue/status behavior |
 | Game storage comparison | 200 zlib requests matched the reference in the recorded checkpoint | Correct decompression for those captured requests; not every streaming format |
 | HTTP/XCurl probe | **139 checks, exit 0**; 2 valid server requests, 0 server errors | Original libraries perform loopback HTTP and complete their tested callback/cleanup paths |
 | Sandbox probe | `leaks=0` | The interfaces and paths checked by the isolation probe were not exposed |
-| Game trace | Repeated synthetic draws, submissions, and PresentX requests | The instrumented executable reaches that startup path |
+| Game trace | **Game Running, Frame 82** | Passed Game Init; internal frame counter, not validated game imagery |
+| Diagnostic DXGI presentation | Swapchain creation and repeated test-pattern `Present S_OK` | Native presentation of generated pixels; not a correctly rendered game frame |
 
 The **62/0** graphics result belongs to a frozen build in `tests/08-graphics-bootstrap/`, with its source preserved under `compat/reports/graphics-resume-20261124/bootstrap-isolated/`. Prebuilt artifacts and private runtime evidence are excluded from this publication. Concurrent experiments in the shared graphics source are not automatically covered by that result.
 
@@ -546,10 +529,10 @@ compat/
 ├── d3d12_xs/                 Current Xbox D3D12 adapters and diagnostics
 ├── runtime/
 │   ├── xmem/                Memory and shared physical-page views
-│   ├── xcrdapi/             Storage queues, files, inflater
+│   ├── xcrdapi/             Storage queues, files, miniz/tinfl and fallback inflater
 │   ├── xg/                  Linear texture-layout prototype
 │   ├── gameinput/           No-device input implementation
-│   ├── audio/               APU memory and diagnostic channel object
+│   ├── audio/               APU memory and command/message FIFO
 │   ├── network/             Scoped XNetworking loopback provider
 │   └── xgr_proxy/           GameRuntime forwarding and XPackage prototype
 ├── ffx_min/                 Bilinear upscaler fallback source
@@ -782,7 +765,9 @@ This records a bounded number of early descriptions and candidate data blocks fo
 | `XSX_DS_LOG` / `XSX_DS_DUMP` | Log requests / capture a bounded number of storage inputs and outputs locally |
 | `XSX_TRAP` | Enable build-specific in-memory diagnostic traps; captured data stays local |
 | `XSX_XMEM_ALIAS=0` | Disable shared physical-page mapping for comparison |
-| `XSX_XMEM_DUP_PRIVATE` | Optional repeated-page diagnostic that replaces sharing with private memory |
+| `XSX_DS_THREADS` | Select the DirectStorage worker-pool size |
+| `XSX_THREAD_DUMP=1` | Capture thread stacks at the first breakpoint for local diagnosis |
+| `XSX_PRESENT_PATTERN=1` | Force the generated DXGI presentation pattern |
 
 These are development controls, not stable end-user settings.
 
@@ -843,13 +828,13 @@ The largest open areas are:
 - **Physical pages:** shared aliases work in supported placeholder regions; fallback mappings, identifier lifetime, allocation policies, and cache semantics remain incomplete.
 - **Descriptors:** raw guest descriptor writes and GPU descriptor addressing need a complete model.
 - **Texture layouts:** swizzle and the full texture-computer ABI remain incomplete.
-- **Presentation:** the documented PresentX adapter records attempts; a native displayed-frame bridge is still required.
+- **Presentation:** the native bridge presents a diagnostic pattern; correct game-resource copies, resizing, state transitions, and lifecycle still need validation.
 - **Ray tracing:** the existing BVH-related empty-compute placeholders do not build usable acceleration structures or implement the game's ray-tracing behavior.
-- **Audio:** memory handling is tested; the later channel object is diagnostic, and SHAPE/DSP/codec/output processing is absent.
+- **Audio:** the completion FIFO advances startup, but SHAPE/DSP/codec/output processing is absent.
 - **Input:** the current GameInput shim supplies no real device readings.
 - **Services:** loopback HTTP does not establish remote/TLS behavior, account services, saves, or online gameplay.
 - **Portability:** local paths, selected GDK/runtime versions, game-specific workarounds, and manual setup remain in the research tree.
-- **Stability:** game startup still fails, and there is no demonstrated menu, sustained rendering, gameplay, or performance profile.
+- **Stability:** the game passes initialization but still stops at a linear-buffer assertion; there is no verified menu, sustained correct game rendering, gameplay, or performance profile.
 
 ## Roadmap
 
@@ -857,15 +842,15 @@ The largest open areas are:
 
 1. Keep one reproducible graphics baseline and associate game runs with exact artifacts.
 2. Use the slot/caller registry to investigate only demonstrated blockers on the submission/presentation path.
-3. Advance startup with the explicit synthetic-PSO mode and inspect Draw/Dispatch/Execute/PresentX counters.
-4. Complete frame-token/statistics semantics and implement native presentation.
+3. Resolve the current linear-buffer capacity assertion while preserving the Game Running milestone.
+4. Complete frame-token/statistics semantics and validate game-resource presentation through the native bridge.
 5. Establish guest-memory-to-GPU-resource mappings and a descriptor model suitable for real game resources.
 
-A synthetic clear or displayed diagnostic surface will be recorded as a presentation milestone. A correctly rendered game image requires the game's data and shaders to participate in the path.
+Native test-pattern presentation is recorded as a diagnostic milestone. A correctly rendered game image still requires the game's data and shaders to participate in the path.
 
 ### Rendering correctness
 
-1. Validate the revised scatter ABI and resolve the current archive/cache data failure, then connect captured native PSO requests to shader-archive records and translated PC pipelines.
+1. Connect captured native PSO requests to shader-archive records and translated PC pipelines while preserving the corrected PFN and DStorage completion behavior.
 2. Expand instruction semantics, user-data/root bindings, and pixel/texture operations.
 3. Support the required mesh/geometry workloads and synchronization.
 4. Implement texture layout/swizzle and validate uploaded resource contents.
@@ -874,7 +859,7 @@ A synthetic clear or displayed diagnostic surface will be recorded as a presenta
 
 ### Complete the surrounding runtime
 
-1. Implement SHAPE command/message processing, audio scheduling, codecs, and PCM output.
+1. Extend the bootstrap SHAPE command/message transport to graph execution, audio scheduling, codecs, and PCM output.
 2. Deliver real input readings and correct callback behavior.
 3. Expand storage request coverage and streaming reliability.
 4. Integrate runtime services with defined offline/error behavior, persistent state, and the networking required by each target.
@@ -892,6 +877,6 @@ A synthetic clear or displayed diagnostic surface will be recorded as a presenta
 
 XSX-Compat builds on the work of Wine, VKD3D-Proton, DXVK, Mesa, LLVM/AMDGPU, DXC, and publicly available Xbox GDK samples. AMD ISA documentation and community format research also inform the analysis tools.
 
-The game, game content, platform SDKs, and native third-party runtime/library files are external development inputs. They are not supplied by this README. Project-authored adapters, tests, and tools are kept separate from those inputs and generated runtime artifacts.
+The game, game content, platform SDKs, and native runtime/library binaries are external development inputs and remain excluded. The storage source now bundles miniz C/header files with their copyright and permission notice. AcpHal/resource interface research also references the open VIctory implementation; provenance is recorded in [THIRD_PARTY.md](THIRD_PARTY.md).
 
 **Project license: not yet specified.** Third-party components retain their respective licenses. A project-wide license should be selected explicitly before presenting the source as a licensed release.

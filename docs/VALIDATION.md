@@ -21,12 +21,19 @@ AcpHal, XG, and GameInput DLLs; the graphics regression executable; and the
 sanitized sandbox probe. The frozen graphics adapter and earlier XMem alias
 source were also compiled separately.
 
+For the Game Running checkpoint refresh, the exported D3D12, XMem, AcpHal, and
+XCRDAPI adapters were compiled again, including the bundled miniz C object.
+The updated XMem alias probe and storage probe also compiled. Runtime results
+were read from the existing development evidence; this export did not rerun Wine.
+
 These are compilation and source-only test results. The export preparation does
 not claim a new Wine/GPU run, a new successful native FFX context, or a game
 frame. The older 62/0 graphics, 13/13 XMem v1, 19-check APU, and 139-check network
 results retain the build/fixture boundaries described in [STATUS.md](STATUS.md).
-In particular, the latest grouped-scatter behavior and diagnostic audio-channel
-object do not inherit the earlier tests' runtime validation.
+In particular, the current resource/presentation adapters and AcpHal FIFO do not
+inherit the frozen graphics or earlier APU channel tests' runtime validation.
+The newer 16/16 XMem and 20/20 storage results are recorded from the development
+checkpoint, together with Game Running / frame 82 and diagnostic Present S_OK.
 
 The final inventory is `PUBLIC_SOURCE_MANIFEST.json`. Recheck the selected tree:
 
@@ -34,5 +41,5 @@ The final inventory is `PUBLIC_SOURCE_MANIFEST.json`. Recheck the selected tree:
 python3 tools/audit-public-tree.py --verify-manifest
 ```
 
-The audit excludes existing `.git` metadata. The inspected existing history had
-only README content; this preparation did not create a commit or upload files.
+The audit excludes existing `.git` metadata. Runtime logs, game content, local
+prefixes, and generated build outputs remain outside the published source tree.

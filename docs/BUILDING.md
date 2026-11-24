@@ -28,7 +28,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 compat/tools/test-inspect-game-report.py Expor
 
 ## Windows-facing adapters
 
-Use the x86-64 MinGW-w64 C++ toolchain. Its Windows/D3D headers must cover the
+Use the x86-64 MinGW-w64 C and C++ toolchains. Its Windows/D3D headers must cover the
 interfaces referenced by the source. These adapters do not require game files
 to compile:
 
@@ -39,6 +39,8 @@ bash compat/build-xcrdapi.sh
 bash compat/build-xgr_proxy.sh
 bash compat/build-audio.sh
 ```
+
+The storage build compiles the bundled miniz C source with `x86_64-w64-mingw32-gcc` before linking the adapter.
 
 Generated DLLs go under `compat/build/`; the graphics script also copies its DLL
 into `tests/03-fidelityfx/`. Both the outputs and deployment are local.
@@ -108,9 +110,10 @@ x86_64-w64-mingw32-g++ -std=c++17 -O2 -static \
 ```
 
 Run in a locally configured Wine environment to check shared writes, partial
-remap, and unmap. The later runtime's group-based Scatter interpretation is a
-separate experiment. Its current probe source still encodes the older repeated
-individual-page expectation; the historical 13/13 result does not cover v2.
+remap, and unmap. This source is historical. The current runtime uses PFN IDs
+in steps of 16 and literal Scatter identifiers; its updated probe records 16/16.
+Build that probe from `compat/tests/xmem-alias-test.cpp` against the current
+`xmem.dll` to check the newer contract.
 
 ## Other probes and external fixtures
 
@@ -132,7 +135,7 @@ fixture failures as parser regressions.
 `build-services-probes.sh` currently builds both audio and networking and expects
 the local GDK include path and DLL layout. The APU memory probe can also be built
 alone, but its final channel assertion targets the historical unsupported-object
-contract. The current dummy-channel implementation is not covered by that result.
+contract. The current command/message FIFO is not covered by that result.
 
 Generated `native-vs-data.h` / `native-cs-data.h` and translated HLSL/DXIL derived
 from game programs remain private. The build scripts generate them locally; they
