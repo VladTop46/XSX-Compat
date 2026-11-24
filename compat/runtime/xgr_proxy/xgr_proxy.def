@@ -1,0 +1,9 @@
+LIBRARY xgameruntime.dll
+EXPORTS
+    DllCanUnloadNow=xgr_DllCanUnloadNow PRIVATE
+    InitializeApiImpl=xgr_InitializeApiImpl
+    InitializeApiImplEx=xgr_InitializeApiImplEx
+    InitializeApiImplEx2=xgr_InitializeApiImplEx2
+    QueryApiImpl=xgr_QueryApiImpl
+    UninitializeApiImpl=xgr_UninitializeApiImpl
+    XErrorReport=xgr_XErrorReport

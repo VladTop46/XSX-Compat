@@ -1,0 +1,7 @@
+LIBRARY xapu.dll
+EXPORTS
+    XApuConnect
+    XApuDequeueResult
+    XApuDisconnect
+    XApuEnqueueCommand
+    XApuGetResultCount

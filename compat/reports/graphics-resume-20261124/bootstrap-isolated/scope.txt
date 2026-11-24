@@ -1,0 +1,1 @@
+Isolated no-op GPU probe. Concurrent device80/81 hooks excluded from this frozen copy; shared source left untouched.

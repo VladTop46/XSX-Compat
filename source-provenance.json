@@ -1,0 +1,782 @@
+{
+  "schema": 1,
+  "snapshot_date": "2026-11-24",
+  "scope": "Selected authored source; paths relative to the development root; no binary inputs included",
+  "files": [
+    {
+      "path": "compat/build-audio.sh",
+      "source_sha256": "9d2cc9e1cd2f3f0c496659257ad0f1a2baf5a298874df33cc545122c25ffa9cb",
+      "export_sha256": "9d2cc9e1cd2f3f0c496659257ad0f1a2baf5a298874df33cc545122c25ffa9cb",
+      "adjustments": []
+    },
+    {
+      "path": "compat/build-d3d12_xs.sh",
+      "source_sha256": "179ff176ddc143f4f934c82efbc1569e6f4bc6a9b4bf36f173b0e575b4e426c7",
+      "export_sha256": "d47f32f6678f5fab2608adab3123dafc575542843dd3e8110cc438d9f053cd6b",
+      "adjustments": [
+        "Create build output directories for a fresh source checkout"
+      ]
+    },
+    {
+      "path": "compat/build-ffx_min.sh",
+      "source_sha256": "9131e27333a5750d0631094db0fc08e44bb0b6e8adc341db57134bc5b585eb98",
+      "export_sha256": "9131e27333a5750d0631094db0fc08e44bb0b6e8adc341db57134bc5b585eb98",
+      "adjustments": []
+    },
+    {
+      "path": "compat/build-native-cs-probe.sh",
+      "source_sha256": "2b9a60343ac25ee1c3bc0a138b4f8b03f3c6cf3bccceca39e39374eb7c6a121a",
+      "export_sha256": "2b9a60343ac25ee1c3bc0a138b4f8b03f3c6cf3bccceca39e39374eb7c6a121a",
+      "adjustments": []
+    },
+    {
+      "path": "compat/build-native-vs-probe.sh",
+      "source_sha256": "0f83e595f55336b4bedd84812b6de0ebdf8b8896eac6b60d0c8ab1466446bcfa",
+      "export_sha256": "0f83e595f55336b4bedd84812b6de0ebdf8b8896eac6b60d0c8ab1466446bcfa",
+      "adjustments": []
+    },
+    {
+      "path": "compat/build-services-probes.sh",
+      "source_sha256": "c7f4cf4ac2d804d655db0eeaca7842766e45c9410efe13de0b4dc0d98b5dec5b",
+      "export_sha256": "c7f4cf4ac2d804d655db0eeaca7842766e45c9410efe13de0b4dc0d98b5dec5b",
+      "adjustments": []
+    },
+    {
+      "path": "compat/build-xcrdapi.sh",
+      "source_sha256": "1491a58e58feab632823f30dff9453771c2b75a1b277e8bba54e7286218bffba",
+      "export_sha256": "1491a58e58feab632823f30dff9453771c2b75a1b277e8bba54e7286218bffba",
+      "adjustments": []
+    },
+    {
+      "path": "compat/build-xgr_proxy.sh",
+      "source_sha256": "137aaf8f520b6fdc3e6c54a00099e2744df9f3e3d4f4da27fef3a6e361f0672a",
+      "export_sha256": "137aaf8f520b6fdc3e6c54a00099e2744df9f3e3d4f4da27fef3a6e361f0672a",
+      "adjustments": []
+    },
+    {
+      "path": "compat/build-xmem.sh",
+      "source_sha256": "aba015ad028dce3e77d923752eef6f007c38bcb31e167c3abe9e2c172e1ff9cc",
+      "export_sha256": "aba015ad028dce3e77d923752eef6f007c38bcb31e167c3abe9e2c172e1ff9cc",
+      "adjustments": []
+    },
+    {
+      "path": "compat/d3d12_xs/bootstrap_noop_pso.h",
+      "source_sha256": "7b163eac840c42d598f94f2d2b3eadd8f610b62727304ef74a78dcd6c0c6ebad",
+      "export_sha256": "7b163eac840c42d598f94f2d2b3eadd8f610b62727304ef74a78dcd6c0c6ebad",
+      "adjustments": []
+    },
+    {
+      "path": "compat/d3d12_xs/d3d12_xs.cpp",
+      "source_sha256": "3d19123838f576e2714663fde6d0500e10d524e24da81847433b4afa719c82aa",
+      "export_sha256": "3d19123838f576e2714663fde6d0500e10d524e24da81847433b4afa719c82aa",
+      "adjustments": []
+    },
+    {
+      "path": "compat/d3d12_xs/d3d12_xs.def",
+      "source_sha256": "75717e7330e8e669b23a300f4e4b14111db844fec17fddac7e729fc07ef9e979",
+      "export_sha256": "75717e7330e8e669b23a300f4e4b14111db844fec17fddac7e729fc07ef9e979",
+      "adjustments": []
+    },
+    {
+      "path": "compat/d3d12_xs/d3d12_xs_fwd.inc",
+      "source_sha256": "aab427ae53fc5b47486d57feb54cde27b9075c114b42428c5fb326bcd9a0ebb7",
+      "export_sha256": "aab427ae53fc5b47486d57feb54cde27b9075c114b42428c5fb326bcd9a0ebb7",
+      "adjustments": []
+    },
+    {
+      "path": "compat/d3d12_xs/fence_mirror.h",
+      "source_sha256": "465eb68c2f4ccb1bcba75b2577eed45baa8a3d7909a516357a81ffeb84140740",
+      "export_sha256": "465eb68c2f4ccb1bcba75b2577eed45baa8a3d7909a516357a81ffeb84140740",
+      "adjustments": []
+    },
+    {
+      "path": "compat/d3d12_xs/native_pso_capture.h",
+      "source_sha256": "0691c60947dc778c882473f7b98cc7f5068eb1466e6266c1898809c96950adb5",
+      "export_sha256": "0691c60947dc778c882473f7b98cc7f5068eb1466e6266c1898809c96950adb5",
+      "adjustments": []
+    },
+    {
+      "path": "compat/ffx_min/ffx_min.cpp",
+      "source_sha256": "76a0d09521ebfa2b3fb6e6e931adb5fa87ff92854239ec3204e3c3b55e77712a",
+      "export_sha256": "76a0d09521ebfa2b3fb6e6e931adb5fa87ff92854239ec3204e3c3b55e77712a",
+      "adjustments": []
+    },
+    {
+      "path": "compat/prepare-services-prefix.sh",
+      "source_sha256": "609376f47da8dda21896e071b55b3b6c9242234ae1ec67f89643fd30e3485c28",
+      "export_sha256": "609376f47da8dda21896e071b55b3b6c9242234ae1ec67f89643fd30e3485c28",
+      "adjustments": []
+    },
+    {
+      "path": "compat/reports/graphics-resume-20261124/bootstrap-isolated/bootstrap_noop_pso.h",
+      "source_sha256": "7b163eac840c42d598f94f2d2b3eadd8f610b62727304ef74a78dcd6c0c6ebad",
+      "export_sha256": "7b163eac840c42d598f94f2d2b3eadd8f610b62727304ef74a78dcd6c0c6ebad",
+      "adjustments": []
+    },
+    {
+      "path": "compat/reports/graphics-resume-20261124/bootstrap-isolated/d3d12-xs-ia-probe.h",
+      "source_sha256": "1ae478dcaa00271713bab9444e571db8722be3d783e2b1ea490f867af7d798ee",
+      "export_sha256": "1ae478dcaa00271713bab9444e571db8722be3d783e2b1ea490f867af7d798ee",
+      "adjustments": []
+    },
+    {
+      "path": "compat/reports/graphics-resume-20261124/bootstrap-isolated/d3d12-xs-roundtrip.cpp",
+      "source_sha256": "3e513ba3c5d3393d816e2bf6e669f54151d844b1c5378082a727e27b48024430",
+      "export_sha256": "3e513ba3c5d3393d816e2bf6e669f54151d844b1c5378082a727e27b48024430",
+      "adjustments": []
+    },
+    {
+      "path": "compat/reports/graphics-resume-20261124/bootstrap-isolated/d3d12_xs.cpp",
+      "source_sha256": "444b65f43a6030bbc4707610fdb46b1ab9beb1050ed13727068d6cdac5d8df63",
+      "export_sha256": "444b65f43a6030bbc4707610fdb46b1ab9beb1050ed13727068d6cdac5d8df63",
+      "adjustments": []
+    },
+    {
+      "path": "compat/reports/graphics-resume-20261124/bootstrap-isolated/d3d12_xs.def",
+      "source_sha256": "75717e7330e8e669b23a300f4e4b14111db844fec17fddac7e729fc07ef9e979",
+      "export_sha256": "75717e7330e8e669b23a300f4e4b14111db844fec17fddac7e729fc07ef9e979",
+      "adjustments": []
+    },
+    {
+      "path": "compat/reports/graphics-resume-20261124/bootstrap-isolated/d3d12_xs_fwd.inc",
+      "source_sha256": "aab427ae53fc5b47486d57feb54cde27b9075c114b42428c5fb326bcd9a0ebb7",
+      "export_sha256": "aab427ae53fc5b47486d57feb54cde27b9075c114b42428c5fb326bcd9a0ebb7",
+      "adjustments": []
+    },
+    {
+      "path": "compat/reports/graphics-resume-20261124/bootstrap-isolated/fence_mirror.h",
+      "source_sha256": "465eb68c2f4ccb1bcba75b2577eed45baa8a3d7909a516357a81ffeb84140740",
+      "export_sha256": "465eb68c2f4ccb1bcba75b2577eed45baa8a3d7909a516357a81ffeb84140740",
+      "adjustments": []
+    },
+    {
+      "path": "compat/reports/graphics-resume-20261124/bootstrap-isolated/native_pso_capture.h",
+      "source_sha256": "0691c60947dc778c882473f7b98cc7f5068eb1466e6266c1898809c96950adb5",
+      "export_sha256": "0691c60947dc778c882473f7b98cc7f5068eb1466e6266c1898809c96950adb5",
+      "adjustments": []
+    },
+    {
+      "path": "compat/reports/graphics-resume-20261124/bootstrap-isolated/scope.txt",
+      "source_sha256": "a276020cbff5fd036db2b01c375dba6ba09f5c48fbfe556253509ed1a367fcb9",
+      "export_sha256": "a276020cbff5fd036db2b01c375dba6ba09f5c48fbfe556253509ed1a367fcb9",
+      "adjustments": []
+    },
+    {
+      "path": "compat/run-services-probes.sh",
+      "source_sha256": "a95f5c68855bb294d1ba55b65cabcfaa1ecba9ae78638879f1ad57d7faa16a90",
+      "export_sha256": "a95f5c68855bb294d1ba55b65cabcfaa1ecba9ae78638879f1ad57d7faa16a90",
+      "adjustments": []
+    },
+    {
+      "path": "compat/run-test.sh",
+      "source_sha256": "abf922b06fa90a1c406215353336d4210953389d660920d68dcb2043aa00b410",
+      "export_sha256": "abf922b06fa90a1c406215353336d4210953389d660920d68dcb2043aa00b410",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/audio/acphal.cpp",
+      "source_sha256": "43c3ebee9f9c47b19913e3d3ee4284701fac4fef23902797556122c8b9cbb6e6",
+      "export_sha256": "43c3ebee9f9c47b19913e3d3ee4284701fac4fef23902797556122c8b9cbb6e6",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/audio/acphal.def",
+      "source_sha256": "e4ec38604098d5e15a4b4a4fdccef525d34275558be5d6992756f71a1a33ecb0",
+      "export_sha256": "e4ec38604098d5e15a4b4a4fdccef525d34275558be5d6992756f71a1a33ecb0",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/audio/apu_memory.h",
+      "source_sha256": "ebddbbb553427957a675762614ab07cd2ba1520b355dfd0391667f7811ca9434",
+      "export_sha256": "ebddbbb553427957a675762614ab07cd2ba1520b355dfd0391667f7811ca9434",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/gameinput/gameinput.cpp",
+      "source_sha256": "02289d5d77c345ff993b00db44c5a77afe9d2c903ac503b0d426197b71c8e526",
+      "export_sha256": "02289d5d77c345ff993b00db44c5a77afe9d2c903ac503b0d426197b71c8e526",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/gameinput/gameinput.def",
+      "source_sha256": "250a8f7f13a2331e42cac43727ba301a8d2abec814f834b065742d28e5da3327",
+      "export_sha256": "250a8f7f13a2331e42cac43727ba301a8d2abec814f834b065742d28e5da3327",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/network/xnetworking_loopback.h",
+      "source_sha256": "02f0777f084ad396f20e50c474b155a0a79d93f3ed1bbece706a56a24048b6bf",
+      "export_sha256": "02f0777f084ad396f20e50c474b155a0a79d93f3ed1bbece706a56a24048b6bf",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/xcrdapi/inflate.h",
+      "source_sha256": "41c8a1380f1e5e750fa138a9b29c6d9d2f2b3ec7a71c522f7a186460d9ee3533",
+      "export_sha256": "41c8a1380f1e5e750fa138a9b29c6d9d2f2b3ec7a71c522f7a186460d9ee3533",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/xcrdapi/xcrdapi.cpp",
+      "source_sha256": "ee799a75233e7b1569bfd74ac5e3895ebe54ec72c98931b23111601f863f01b3",
+      "export_sha256": "ee799a75233e7b1569bfd74ac5e3895ebe54ec72c98931b23111601f863f01b3",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/xcrdapi/xcrdapi.def",
+      "source_sha256": "24f742c4f77509dffb1a03d6f163f30218a5e8e4139ba01464d59739872cac5e",
+      "export_sha256": "24f742c4f77509dffb1a03d6f163f30218a5e8e4139ba01464d59739872cac5e",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/xg/xg_xs.cpp",
+      "source_sha256": "dd9ac8e670af2194bb5e901904d4c08008880ad32eb163d0a971a6c76d798f1a",
+      "export_sha256": "dd9ac8e670af2194bb5e901904d4c08008880ad32eb163d0a971a6c76d798f1a",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/xg/xg_xs.def",
+      "source_sha256": "e47b582cbc54a762d6e8ad85196d0f9ea8db35dd154202dd3792d171585929c2",
+      "export_sha256": "e47b582cbc54a762d6e8ad85196d0f9ea8db35dd154202dd3792d171585929c2",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/xgr_proxy/xgr_proxy.cpp",
+      "source_sha256": "88014a73d8df629e226a86c0ce56b3b9f6ec758ca74af9e1971dc3f177c5edf4",
+      "export_sha256": "88014a73d8df629e226a86c0ce56b3b9f6ec758ca74af9e1971dc3f177c5edf4",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/xgr_proxy/xgr_proxy.def",
+      "source_sha256": "47775631c1f557b031b9305b139677b8eaa78b9690c156059565ee1ba5dd78ef",
+      "export_sha256": "47775631c1f557b031b9305b139677b8eaa78b9690c156059565ee1ba5dd78ef",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/xmem/phys.h",
+      "source_sha256": "49337cf0fac83489e5e3d6afb024c5c54a4cd53c07f2c55096f7d3593174a244",
+      "export_sha256": "49337cf0fac83489e5e3d6afb024c5c54a4cd53c07f2c55096f7d3593174a244",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/xmem/xmem.cpp",
+      "source_sha256": "a4895829fea6072a5df0f4afbed2630849e20f3b6c3f7be7e1ebdf2619aa64f9",
+      "export_sha256": "a4895829fea6072a5df0f4afbed2630849e20f3b6c3f7be7e1ebdf2619aa64f9",
+      "adjustments": []
+    },
+    {
+      "path": "compat/runtime/xmem/xmem.def",
+      "source_sha256": "1fb9e55db0fba07eeebebedbbb4f155c18eea45ce8fa20dc577381812bbe0a76",
+      "export_sha256": "1fb9e55db0fba07eeebebedbbb4f155c18eea45ce8fa20dc577381812bbe0a76",
+      "adjustments": []
+    },
+    {
+      "path": "compat/sandbox/dbg-int3.sh",
+      "source_sha256": "6883808b1873bdd75a8ee34a3b2e7591a7be4c9122b88db82922c630432eeea7",
+      "export_sha256": "6883808b1873bdd75a8ee34a3b2e7591a7be4c9122b88db82922c630432eeea7",
+      "adjustments": []
+    },
+    {
+      "path": "compat/sandbox/deploy-game.sh",
+      "source_sha256": "5a1470c9d42e5e3d98c469e00b2bcd0d7b7dfe09cb2559e88482794ec49d7a26",
+      "export_sha256": "5a1470c9d42e5e3d98c469e00b2bcd0d7b7dfe09cb2559e88482794ec49d7a26",
+      "adjustments": []
+    },
+    {
+      "path": "compat/sandbox/link-gamedata.sh",
+      "source_sha256": "79d7bd3931578fcedad89580b5e4618c19499c2c9100b31e4eca2f6cbcf514ff",
+      "export_sha256": "79d7bd3931578fcedad89580b5e4618c19499c2c9100b31e4eca2f6cbcf514ff",
+      "adjustments": []
+    },
+    {
+      "path": "compat/sandbox/run-game.sh",
+      "source_sha256": "d77b70aa471d5bad8fdbd7be26d0e8dc0535171a1968c3ecb0943a4b9accbe7b",
+      "export_sha256": "d77b70aa471d5bad8fdbd7be26d0e8dc0535171a1968c3ecb0943a4b9accbe7b",
+      "adjustments": []
+    },
+    {
+      "path": "compat/sandbox/xsx-sandbox.sh",
+      "source_sha256": "16042c4a272cc90be23c70f7c7a21c30781db1a7e35cf1b8b22dade7ef707c02",
+      "export_sha256": "16042c4a272cc90be23c70f7c7a21c30781db1a7e35cf1b8b22dade7ef707c02",
+      "adjustments": []
+    },
+    {
+      "path": "compat/stubs/AcpHal.cpp",
+      "source_sha256": "6f1af891938e2f41b9966e497c40006fa0fd1d77e14d0742780e2632024a4867",
+      "export_sha256": "6f1af891938e2f41b9966e497c40006fa0fd1d77e14d0742780e2632024a4867",
+      "adjustments": []
+    },
+    {
+      "path": "compat/stubs/AcpHal.def",
+      "source_sha256": "e4ec38604098d5e15a4b4a4fdccef525d34275558be5d6992756f71a1a33ecb0",
+      "export_sha256": "e4ec38604098d5e15a4b4a4fdccef525d34275558be5d6992756f71a1a33ecb0",
+      "adjustments": []
+    },
+    {
+      "path": "compat/stubs/chad.cpp",
+      "source_sha256": "abfe219db15b55e565c12455fe68a370da1fad343170a42608cb965f96a8faf4",
+      "export_sha256": "abfe219db15b55e565c12455fe68a370da1fad343170a42608cb965f96a8faf4",
+      "adjustments": []
+    },
+    {
+      "path": "compat/stubs/chad.def",
+      "source_sha256": "c27345ea56f10a54a8b8404dc2d0732ed1c0b0b87eb36e66a59d1db3be91a72f",
+      "export_sha256": "c27345ea56f10a54a8b8404dc2d0732ed1c0b0b87eb36e66a59d1db3be91a72f",
+      "adjustments": []
+    },
+    {
+      "path": "compat/stubs/xapu.cpp",
+      "source_sha256": "043fc9d7057e56fd19f87a49ccdbae2e49ab8bce63a744cdf15c41d04163524e",
+      "export_sha256": "043fc9d7057e56fd19f87a49ccdbae2e49ab8bce63a744cdf15c41d04163524e",
+      "adjustments": []
+    },
+    {
+      "path": "compat/stubs/xapu.def",
+      "source_sha256": "a8dd8d9b450425087c7f5364f4245ceea92ae2a0a14555b509c307bfa9b6ed67",
+      "export_sha256": "a8dd8d9b450425087c7f5364f4245ceea92ae2a0a14555b509c307bfa9b6ed67",
+      "adjustments": []
+    },
+    {
+      "path": "compat/stubs/xg_xs.cpp",
+      "source_sha256": "8a0619e34a967e8f7d2daff389022ec08cd4bfbf909de961d204903dbd414894",
+      "export_sha256": "8a0619e34a967e8f7d2daff389022ec08cd4bfbf909de961d204903dbd414894",
+      "adjustments": []
+    },
+    {
+      "path": "compat/stubs/xg_xs.def",
+      "source_sha256": "e47b582cbc54a762d6e8ad85196d0f9ea8db35dd154202dd3792d171585929c2",
+      "export_sha256": "e47b582cbc54a762d6e8ad85196d0f9ea8db35dd154202dd3792d171585929c2",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/apu-memory-test.cpp",
+      "source_sha256": "3b32604ccce232137645382a940657d0a0cd64029b6dcfb10f14ec7f3937fec4",
+      "export_sha256": "3b32604ccce232137645382a940657d0a0cd64029b6dcfb10f14ec7f3937fec4",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/apu-runtime-probe.cpp",
+      "source_sha256": "934a4bdd20d897eeb1609f88c1c47c152b77c87e528fb4c2be2212236ab65088",
+      "export_sha256": "934a4bdd20d897eeb1609f88c1c47c152b77c87e528fb4c2be2212236ab65088",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/census-device-slots.py",
+      "source_sha256": "fe981c2f3430eee11381d7ce246470fe13235952449a36f0b0c642460d6561d1",
+      "export_sha256": "fe981c2f3430eee11381d7ce246470fe13235952449a36f0b0c642460d6561d1",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/d3d12-xs-ia-probe.h",
+      "source_sha256": "1ae478dcaa00271713bab9444e571db8722be3d783e2b1ea490f867af7d798ee",
+      "export_sha256": "1ae478dcaa00271713bab9444e571db8722be3d783e2b1ea490f867af7d798ee",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/d3d12-xs-roundtrip.cpp",
+      "source_sha256": "3e513ba3c5d3393d816e2bf6e669f54151d844b1c5378082a727e27b48024430",
+      "export_sha256": "3e513ba3c5d3393d816e2bf6e669f54151d844b1c5378082a727e27b48024430",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/ffx-context.cpp",
+      "source_sha256": "aa9ed32405d2b5596737a899328e9cb743b47ae7629f8f2a25d68c8d75d4fa51",
+      "export_sha256": "aa9ed32405d2b5596737a899328e9cb743b47ae7629f8f2a25d68c8d75d4fa51",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/ffx-min-test.cpp",
+      "source_sha256": "f90f0d625c18cfd4b7f77310815f81ef19e202fbbb4d041b0882369335af078a",
+      "export_sha256": "f90f0d625c18cfd4b7f77310815f81ef19e202fbbb4d041b0882369335af078a",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/ffx-query.cpp",
+      "source_sha256": "7f7b64b4b2a38fe852394bf7f3596672dc491914abd274e1f600f2a232f07209",
+      "export_sha256": "7f7b64b4b2a38fe852394bf7f3596672dc491914abd274e1f600f2a232f07209",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/fidelityfx-load.cpp",
+      "source_sha256": "10b63eac5130f406dfc441e7d23c924fc4a3342ba9a1f4ccb294100328db5b33",
+      "export_sha256": "10b63eac5130f406dfc441e7d23c924fc4a3342ba9a1f4ccb294100328db5b33",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/game-import-probe.cpp",
+      "source_sha256": "c012f091f572028643f104473a1370df105176d14101e3b1ffae06862087e622",
+      "export_sha256": "c012f091f572028643f104473a1370df105176d14101e3b1ffae06862087e622",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/gen-zlib-testdata.py",
+      "source_sha256": "9a498de52d9bb55602c1bc1813dec108a5329affdc17217fc1d25020b2caf641",
+      "export_sha256": "9a498de52d9bb55602c1bc1813dec108a5329affdc17217fc1d25020b2caf641",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/hello.cpp",
+      "source_sha256": "cc294188efd7327809fc7c3ae19c5c53a20e90e2dc0ef30d4ab968dcb7cff3d1",
+      "export_sha256": "cc294188efd7327809fc7c3ae19c5c53a20e90e2dc0ef30d4ab968dcb7cff3d1",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/inspect-accc.py",
+      "source_sha256": "fcc6a58efc55a956674361139c379b09bfa8c428348387af27543021b8a73f12",
+      "export_sha256": "fcc6a58efc55a956674361139c379b09bfa8c428348387af27543021b8a73f12",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/inspect-ffx-abi.py",
+      "source_sha256": "b7a1ac068367b544cb46d2670b22adcacf1ec65d93d086e25a5a5d6087583ef8",
+      "export_sha256": "b7a1ac068367b544cb46d2670b22adcacf1ec65d93d086e25a5a5d6087583ef8",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/inspect-xsx-native-pso.py",
+      "source_sha256": "97648178383abb4d4f62775610816eda58dd9d542365de357e31c24f2d74eee4",
+      "export_sha256": "97648178383abb4d4f62775610816eda58dd9d542365de357e31c24f2d74eee4",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/inspect-xsx-shader.py",
+      "source_sha256": "0f5ceb363d907d1151c1f59d895791b8a36c2a5ecea104b1c8ab082bbcf0e2ad",
+      "export_sha256": "0f5ceb363d907d1151c1f59d895791b8a36c2a5ecea104b1c8ab082bbcf0e2ad",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/io-probe.cpp",
+      "source_sha256": "e90f6a59741c74b838339f95e5f7869a1eac855780520dc8ecfe5cb3b5950b16",
+      "export_sha256": "e90f6a59741c74b838339f95e5f7869a1eac855780520dc8ecfe5cb3b5950b16",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/native-cs-pso.cpp",
+      "source_sha256": "9736bac685e1595910761ad8cf5f6554d5be4abef881c0bd84fc6e1a066033d0",
+      "export_sha256": "9736bac685e1595910761ad8cf5f6554d5be4abef881c0bd84fc6e1a066033d0",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/native-vs-pso.cpp",
+      "source_sha256": "d93c11b5228e5302a939b10a10db33493102f71ec3fb219a881838cbbdf2df09",
+      "export_sha256": "d93c11b5228e5302a939b10a10db33493102f71ec3fb219a881838cbbdf2df09",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/network-probe.cpp",
+      "source_sha256": "f6da468aa81de0353c108b0039178a918b997da8e44e9db7e694e50a589b9d79",
+      "export_sha256": "f6da468aa81de0353c108b0039178a918b997da8e44e9db7e694e50a589b9d79",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/placeholder-probe.cpp",
+      "source_sha256": "aa36008ab856be05b082b7d2253814c9b4e3868dab0f42a75d3b884a4e98fd9d",
+      "export_sha256": "aa36008ab856be05b082b7d2253814c9b4e3868dab0f42a75d3b884a4e98fd9d",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/probe-watchdog.h",
+      "source_sha256": "f852d97317be2c50cf1fd86306af69961301bdf50d67e1b966f360f0d4647dac",
+      "export_sha256": "f852d97317be2c50cf1fd86306af69961301bdf50d67e1b966f360f0d4647dac",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/sandbox-probe.cpp",
+      "source_sha256": "e320e0c9b94159710884c57b2c3da2f874226dbeb58062340d14b21f441f26d5",
+      "export_sha256": "f5d0ade307479ea7f2d60d93d99a5c848b81614cec7194cf89cd32a5fc9efc29",
+      "adjustments": [
+        "Replace developer login with required XSX_PROBE_HOST_USER compile definition"
+      ]
+    },
+    {
+      "path": "compat/tests/services-MicrosoftGame.Config",
+      "source_sha256": "c717e927fed52474938839744430ea9476940ace8a97c30822664bd662a3b7ea",
+      "export_sha256": "c717e927fed52474938839744430ea9476940ace8a97c30822664bd662a3b7ea",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/test-native-shader-pack.py",
+      "source_sha256": "987eb50c52567154cbf3ecbbc31ba864e7ddccce9e4e7db2bfa36bef953f4a6a",
+      "export_sha256": "987eb50c52567154cbf3ecbbc31ba864e7ddccce9e4e7db2bfa36bef953f4a6a",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/test-xsx-shader.py",
+      "source_sha256": "299542fb6768c23c4fa9ca767dc1699bebb722be0d21148aa6c4eb52da06a528",
+      "export_sha256": "299542fb6768c23c4fa9ca767dc1699bebb722be0d21148aa6c4eb52da06a528",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/vtable-ids.cpp",
+      "source_sha256": "74a275e82b98fdd8802377e3dcd922539cdc15b5dfdb8b0e72acd6594e544eb1",
+      "export_sha256": "74a275e82b98fdd8802377e3dcd922539cdc15b5dfdb8b0e72acd6594e544eb1",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xcrdapi-test.cpp",
+      "source_sha256": "1f12657916c5fe2370a03bcb5ccff62b28e2b29089d16764f7d90ff23ee1506d",
+      "export_sha256": "1f12657916c5fe2370a03bcb5ccff62b28e2b29089d16764f7d90ff23ee1506d",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xcurl-runtime-trace.h",
+      "source_sha256": "8ee1a52b53bbad903c3f528b5cf1299d385871340072fdd87ccc2b47d1d41abb",
+      "export_sha256": "8ee1a52b53bbad903c3f528b5cf1299d385871340072fdd87ccc2b47d1d41abb",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xmem-alias-test.cpp",
+      "source_sha256": "5bcb58542d86a9b7b73c3eb208a7924c31f0c2d05873c4658423c5096b9f3ff7",
+      "export_sha256": "5bcb58542d86a9b7b73c3eb208a7924c31f0c2d05873c4658423c5096b9f3ff7",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xmem-test.cpp",
+      "source_sha256": "b7f516fccf8160bc57dc5c82cde7511383e7a9cd2053cfbe6643b55f5b88b0d7",
+      "export_sha256": "b7f516fccf8160bc57dc5c82cde7511383e7a9cd2053cfbe6643b55f5b88b0d7",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xsx_debug_trace.h",
+      "source_sha256": "8ff5f76f348948acb50e5e57aee396847e3250b32fa18c27ce8c043916fff3a2",
+      "export_sha256": "8ff5f76f348948acb50e5e57aee396847e3250b32fa18c27ce8c043916fff3a2",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xsx_descriptor_heap_proxy.h",
+      "source_sha256": "070f644798f26bc9d3452f2223dbefec34176940d59057e30784d02a8116d6ec",
+      "export_sha256": "070f644798f26bc9d3452f2223dbefec34176940d59057e30784d02a8116d6ec",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xsx_resource_proxy.h",
+      "source_sha256": "6d2e152f115238faec70deb337ec8954ecfd55f34b4c4127683ee971218784e0",
+      "export_sha256": "6d2e152f115238faec70deb337ec8954ecfd55f34b4c4127683ee971218784e0",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xsx_shader_bindings.py",
+      "source_sha256": "af39ab819b4e5ebdeaa6aca20c7d221c99815448de902fcfd3ae0b1fd4e93d9d",
+      "export_sha256": "af39ab819b4e5ebdeaa6aca20c7d221c99815448de902fcfd3ae0b1fd4e93d9d",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xsx_shader_isa.py",
+      "source_sha256": "9a4d182ec9a247a29fb28f4bcf100783b323184b12257c33ec7f5970217e864f",
+      "export_sha256": "9a4d182ec9a247a29fb28f4bcf100783b323184b12257c33ec7f5970217e864f",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xsx_shader_metadata.py",
+      "source_sha256": "35504ed577c7e46c34f064b57cc851af69f5a6cddc93dfdded1e6477d2516544",
+      "export_sha256": "35504ed577c7e46c34f064b57cc851af69f5a6cddc93dfdded1e6477d2516544",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xsx_shader_pack.py",
+      "source_sha256": "106e3fc5ea4f99f21481b5fef6d50ef3809517bd5d5aa40d3a14844e7e5da8d0",
+      "export_sha256": "106e3fc5ea4f99f21481b5fef6d50ef3809517bd5d5aa40d3a14844e7e5da8d0",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tests/xsx_shader_translate.py",
+      "source_sha256": "2a124d3c5d23853d9491ad3a4965eab5690d292a8cb9fd0bbd8da0531e453eb5",
+      "export_sha256": "2a124d3c5d23853d9491ad3a4965eab5690d292a8cb9fd0bbd8da0531e453eb5",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/func-strings.py",
+      "source_sha256": "88c7041ceb1ff3ad5a66ebfb4b53ff116360b60a8bbf3ebb983d15f11147a7a8",
+      "export_sha256": "88c7041ceb1ff3ad5a66ebfb4b53ff116360b60a8bbf3ebb983d15f11147a7a8",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/gen-fwd.py",
+      "source_sha256": "2a303ca995f530f54223b51d03c81054709b2ba0c381762e5998ef8524410494",
+      "export_sha256": "2a303ca995f530f54223b51d03c81054709b2ba0c381762e5998ef8524410494",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/gen-stub-dlls.py",
+      "source_sha256": "6252606d2e0ea3fb30d9de4ba37c832e8e323a2a77d730fd477354ef991bb13a",
+      "export_sha256": "6252606d2e0ea3fb30d9de4ba37c832e8e323a2a77d730fd477354ef991bb13a",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/inspect-game-report.py",
+      "source_sha256": "1f0dd792ccd9fca8ca386e6bd216b40a0b753d23c2bac970feb821c9b4c87842",
+      "export_sha256": "1f0dd792ccd9fca8ca386e6bd216b40a0b753d23c2bac970feb821c9b4c87842",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/inspect-game-shaders.py",
+      "source_sha256": "c0c310596222c5bc5f8a2db59a93057b3e4f106e567d2fd7e9b5718edfbb51e5",
+      "export_sha256": "c0c310596222c5bc5f8a2db59a93057b3e4f106e567d2fd7e9b5718edfbb51e5",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/inspect-native-pso-capture.py",
+      "source_sha256": "aa373b4ba317bdfd37491f37d04870d127de463b9f984e5dece8c7e82b038751",
+      "export_sha256": "aa373b4ba317bdfd37491f37d04870d127de463b9f984e5dece8c7e82b038751",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/minidump-info.py",
+      "source_sha256": "ff24cbbe4406d42181e101e42377b6c10828711b41a14003f823cad321bd4535",
+      "export_sha256": "ff24cbbe4406d42181e101e42377b6c10828711b41a14003f823cad321bd4535",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/pe-func.py",
+      "source_sha256": "4cded9f7bee20f659def923992560018f79744939015da45c2dad7a10b7e12d0",
+      "export_sha256": "4cded9f7bee20f659def923992560018f79744939015da45c2dad7a10b7e12d0",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/rpf-holes.py",
+      "source_sha256": "db83628b7a7f62ec96291fcae1b3446a25ed67ff6f37719ec5d95e45674153e4",
+      "export_sha256": "db83628b7a7f62ec96291fcae1b3446a25ed67ff6f37719ec5d95e45674153e4",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/rtti.py",
+      "source_sha256": "4b4aee843abb790411d4245a87e75715a29bbae0f63deae4c08b207d1aea93e8",
+      "export_sha256": "4b4aee843abb790411d4245a87e75715a29bbae0f63deae4c08b207d1aea93e8",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/summarize-unmapped-slots.py",
+      "source_sha256": "a8bc8cea0c9d884bf8eed802728b29256543ae0f3ca61bb3f0a978c66aedeffe",
+      "export_sha256": "a8bc8cea0c9d884bf8eed802728b29256543ae0f3ca61bb3f0a978c66aedeffe",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/test-inspect-game-report.py",
+      "source_sha256": "1db45f6038e4cd149f4aeb7f8cee851b62ddb2f69499240bb5ba5b6858049e83",
+      "export_sha256": "1db45f6038e4cd149f4aeb7f8cee851b62ddb2f69499240bb5ba5b6858049e83",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/translate-native-cs.py",
+      "source_sha256": "c6ee0e4bc421402581f994e0488f3aefc9b36bdf588701c90bb7618465122692",
+      "export_sha256": "c6ee0e4bc421402581f994e0488f3aefc9b36bdf588701c90bb7618465122692",
+      "adjustments": []
+    },
+    {
+      "path": "compat/tools/translate-native-vs.py",
+      "source_sha256": "049a6c68bfd054821fe50ccb728b8c84a493e49d522f12dd011232cb6c5cef06",
+      "export_sha256": "049a6c68bfd054821fe50ccb728b8c84a493e49d522f12dd011232cb6c5cef06",
+      "adjustments": []
+    },
+    {
+      "path": "tests/00-hello/Main.cpp",
+      "source_sha256": "df6b5384e3321bbbd671bbf2423b44e454cde6dd7d285f1a5ecc6179335b2b07",
+      "export_sha256": "df6b5384e3321bbbd671bbf2423b44e454cde6dd7d285f1a5ecc6179335b2b07",
+      "adjustments": []
+    },
+    {
+      "path": "tests/01-runtime/test_async.cpp",
+      "source_sha256": "afad3f48cbfed49f70eca7f314632478645fe66b84ded75d89b867e899ae28b6",
+      "export_sha256": "afad3f48cbfed49f70eca7f314632478645fe66b84ded75d89b867e899ae28b6",
+      "adjustments": []
+    },
+    {
+      "path": "tests/01-runtime/test_init.cpp",
+      "source_sha256": "bb317ff30c2139bd41bc831fc670cb11e70d0932a056e7ac35129915c78dd270",
+      "export_sha256": "bb317ff30c2139bd41bc831fc670cb11e70d0932a056e7ac35129915c78dd270",
+      "adjustments": []
+    },
+    {
+      "path": "tests/01-runtime/test_queue.cpp",
+      "source_sha256": "a331b1c8eb75590ef5c0568226de29175a0afb04353b4ec075fbe53a69ebe9a1",
+      "export_sha256": "a331b1c8eb75590ef5c0568226de29175a0afb04353b4ec075fbe53a69ebe9a1",
+      "adjustments": []
+    },
+    {
+      "path": "tests/01-runtime/test_runtime.cpp",
+      "source_sha256": "0fbaa1642ace3143dfdd973dd050f00661026bb07c07a6c2f41065ef488e9c4c",
+      "export_sha256": "0fbaa1642ace3143dfdd973dd050f00661026bb07c07a6c2f41065ef488e9c4c",
+      "adjustments": []
+    },
+    {
+      "path": "tests/01-runtime/test_system.cpp",
+      "source_sha256": "580eef5ac4bd925a897232806661870f8a4a51f6d826ec67869d818c833145e5",
+      "export_sha256": "580eef5ac4bd925a897232806661870f8a4a51f6d826ec67869d818c833145e5",
+      "adjustments": []
+    },
+    {
+      "path": "tests/01-runtime/test_threadpool.cpp",
+      "source_sha256": "fb6a3dd8abc04bef15bfa11eb8e0c02a441ad2b4d1f486e6254616e2d9d450f0",
+      "export_sha256": "fb6a3dd8abc04bef15bfa11eb8e0c02a441ad2b4d1f486e6254616e2d9d450f0",
+      "adjustments": []
+    },
+    {
+      "path": "tests/02-graphics/compute.hlsl",
+      "source_sha256": "f40ffa80ea8a5bbcf5c96b7f32199bd82d255ebce9fdfe662157b33b3e91cf59",
+      "export_sha256": "f40ffa80ea8a5bbcf5c96b7f32199bd82d255ebce9fdfe662157b33b3e91cf59",
+      "adjustments": []
+    },
+    {
+      "path": "tests/02-graphics/test_compute.cpp",
+      "source_sha256": "11a620471620c41e605d6a6a7c9e4d3779f5d3f7e51042fc1b0bd32c4c06a620",
+      "export_sha256": "11a620471620c41e605d6a6a7c9e4d3779f5d3f7e51042fc1b0bd32c4c06a620",
+      "adjustments": []
+    },
+    {
+      "path": "tests/02-graphics/test_d3d12.cpp",
+      "source_sha256": "c0e528c52964507c7dbfcca00bfe761932e139dd720981902055f6e5524a6817",
+      "export_sha256": "c0e528c52964507c7dbfcca00bfe761932e139dd720981902055f6e5524a6817",
+      "adjustments": []
+    },
+    {
+      "path": "tests/03-fidelityfx/test_proxy.cpp",
+      "source_sha256": "7620f2a46409196e84ec834c3a5734065cc0deaf79628bb78dd2a422b7c70b9e",
+      "export_sha256": "7620f2a46409196e84ec834c3a5734065cc0deaf79628bb78dd2a422b7c70b9e",
+      "adjustments": []
+    },
+    {
+      "path": "tests/04-xvc/layout.xml",
+      "source_sha256": "398b3c3eea2b54b255165a3cb284a0d95ef1025df49e1965cedb6c41b627e97c",
+      "export_sha256": "398b3c3eea2b54b255165a3cb284a0d95ef1025df49e1965cedb6c41b627e97c",
+      "adjustments": []
+    },
+    {
+      "path": "tests/05-game/build.sh",
+      "source_sha256": "b3aa035af4fe721190c5aaa2eeec3fbad1e6423e32566010c365b09e1400b3d9",
+      "export_sha256": "b3aa035af4fe721190c5aaa2eeec3fbad1e6423e32566010c365b09e1400b3d9",
+      "adjustments": []
+    },
+    {
+      "path": "compat/reports/xmem-alias-v1/phys.h",
+      "development_source": "compat/runtime/xmem/phys.h",
+      "source_sha256": "636a94756477f614fd68075ca369e4ef53e6600e3003b436bba16bab6d035b23",
+      "export_sha256": "636a94756477f614fd68075ca369e4ef53e6600e3003b436bba16bab6d035b23",
+      "adjustments": [],
+      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
+    },
+    {
+      "path": "compat/reports/xmem-alias-v1/xmem.cpp",
+      "development_source": "compat/runtime/xmem/xmem.cpp",
+      "source_sha256": "839764f4db5ae6996a3e6687aab1a30dd43f4ba1cdad30c80d6e2619dff7251a",
+      "export_sha256": "839764f4db5ae6996a3e6687aab1a30dd43f4ba1cdad30c80d6e2619dff7251a",
+      "adjustments": [],
+      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
+    },
+    {
+      "path": "compat/reports/xmem-alias-v1/xmem.def",
+      "development_source": "compat/runtime/xmem/xmem.def",
+      "source_sha256": "1fb9e55db0fba07eeebebedbbb4f155c18eea45ce8fa20dc577381812bbe0a76",
+      "export_sha256": "1fb9e55db0fba07eeebebedbbb4f155c18eea45ce8fa20dc577381812bbe0a76",
+      "adjustments": [],
+      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
+    },
+    {
+      "path": "compat/reports/xmem-alias-v1/xmem-alias-test.cpp",
+      "development_source": "compat/tests/xmem-alias-test.cpp",
+      "source_sha256": "5bcb58542d86a9b7b73c3eb208a7924c31f0c2d05873c4658423c5096b9f3ff7",
+      "export_sha256": "5bcb58542d86a9b7b73c3eb208a7924c31f0c2d05873c4658423c5096b9f3ff7",
+      "adjustments": [],
+      "note": "Earlier page-id alias version retained before grouped-scatter changes; historical 13-check contract"
+    }
+  ],
+  "snapshot_note": "Includes grouped-scatter v2 changes and report correction observed during export; a frozen source copy, not a live mirror of ongoing development."
+}

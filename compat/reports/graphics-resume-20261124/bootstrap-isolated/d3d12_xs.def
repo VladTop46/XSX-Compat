@@ -1,0 +1,6 @@
+LIBRARY d3d12_xs
+EXPORTS
+    D3D12CreateRootSignatureDeserializer=xsCreateRootSignatureDeserializer
+    D3D12SerializeVersionedRootSignature=xsSerializeVersionedRootSignature
+    D3D12XboxCreateDevice=xsXboxCreateDevice
+    D3D12ConfigureVirtualMemoryX=xsConfigureVirtualMemoryX
