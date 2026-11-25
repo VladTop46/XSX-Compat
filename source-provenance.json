@@ -1291,7 +1291,7 @@
     {
       "path": "native-gfx/README.md",
       "source_sha256": "9ee8b8a99d21aba1fd7834913fda0d14bc91b64189e72ce01467f5cc6acf3d70",
-      "export_sha256": "7aa865fa3df5c97e21b9f540491896c66ab6ab2027ed87ce9d66d40bc666ebf2",
+      "export_sha256": "ebb20702ca5bbef301306c33c6be9e6140f7332c39a284cfb8bbb0c6bbcd275a",
       "adjustments": [
         "Prefix the historical roadmap with current source/runtime evidence boundaries"
       ]

@@ -14,8 +14,8 @@
     },
     {
       "path": "README.md",
-      "size": 12628,
-      "sha256": "33448af269f9b1a8aa1d9fdc66534fac0d8450ddebe944097e5a7466946af5a2"
+      "size": 13275,
+      "sha256": "baffd21c38e20822190a63cd16de32a64700eec6b2b5d542d51c42c4ebb03218"
     },
     {
       "path": "THIRD_PARTY.md",
@@ -949,13 +949,13 @@
     },
     {
       "path": "docs/BUILDING.md",
-      "size": 12038,
-      "sha256": "06208ff6bcf44fcef30021bafec58bd0e96979d3449a4de2550ee340c77c8160"
+      "size": 12883,
+      "sha256": "5defa60db788564d21775b7fdcfeaab373a1fe2aed6451b4da2b0acab1f4a03f"
     },
     {
       "path": "docs/NATIVE_GRAPHICS.md",
-      "size": 4122,
-      "sha256": "b8156c6bb32cd3b833647038506cf7f01c19c55c414688cc75e2718990eea91b"
+      "size": 4605,
+      "sha256": "ba59b4cb0d398eb29ebadcc7a95fdbd77c5e49c66ad89c29aef5e50779a14bdd"
     },
     {
       "path": "docs/PUBLICATION.md",
@@ -963,19 +963,24 @@
       "sha256": "0efe8d982e6b57745aaccabfc765d5bd7aae9627234626ef80a4ccff7ebcb337"
     },
     {
+      "path": "docs/RENDERING_PATHS.md",
+      "size": 5604,
+      "sha256": "b7f3d189e37571b862f04a25db66e6c1d4ad16ec4ff05a54b897295eff8186cd"
+    },
+    {
       "path": "docs/STATUS.md",
-      "size": 8464,
-      "sha256": "7a98e7d6c5a5cfbc119dc9a98145a10344543da0fda27cb6155912ff2cf4ee04"
+      "size": 10160,
+      "sha256": "d5c9b1c317876ec6f22ec2a6a9190e8b1cb2728b1b1524b9873fe83552668e8d"
     },
     {
       "path": "docs/VALIDATION.md",
-      "size": 5290,
-      "sha256": "8a814333678b3f36c7c99bf7809dbbfe6d22d4b97ef3e504656d98c203bec768"
+      "size": 6272,
+      "sha256": "ad8ad859753f5fa0f60de72143bf7ae47a5364881c4dc4d426ec6d328eebf813"
     },
     {
       "path": "local-agent-work/README.md",
-      "size": 1691,
-      "sha256": "ea579e6484974a6995fee80968657ed041faf7407d103dbb143970273e205dbe"
+      "size": 1825,
+      "sha256": "d87677c96fd17ef15950d18880bda0cf4cf7fe22c670a9112033c54ec93f77a9"
     },
     {
       "path": "local-agent-work/build-dll.sh",
@@ -1114,8 +1119,8 @@
     },
     {
       "path": "native-gfx/README.md",
-      "size": 4237,
-      "sha256": "7aa865fa3df5c97e21b9f540491896c66ab6ab2027ed87ce9d66d40bc666ebf2"
+      "size": 4241,
+      "sha256": "ebb20702ca5bbef301306c33c6be9e6140f7332c39a284cfb8bbb0c6bbcd275a"
     },
     {
       "path": "native-gfx/build.sh",
@@ -1185,7 +1190,7 @@
     {
       "path": "source-provenance.json",
       "size": 65953,
-      "sha256": "7b84a9d067d8b8d336305ed4f53c62eb1e6050a9d467a0e1689ea2fce9a3ddf3"
+      "sha256": "14b79d1c6e6600f8273ba20f775830cf3df1470a0b228db3e1ba370d431afff6"
     },
     {
       "path": "tests/00-hello/Main.cpp",
@@ -1264,8 +1269,8 @@
     },
     {
       "path": "tools/sync-from-workspace.py",
-      "size": 8418,
-      "sha256": "ab5e6a19ff08467b1d3a49068505ff9bb087aaeb636a281fdd50d817c445f809"
+      "size": 8312,
+      "sha256": "74056b8625d21b1f72c62abe25dbdab59e6a643af9a4dc449f0590beeb827a6f"
     }
   ]
 }

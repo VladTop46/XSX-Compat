@@ -2,18 +2,21 @@
 
 Research into running native Xbox Series X x86-64 code on Linux, adapting Xbox API/ABI contracts around Wine, VKD3D-Proton and an experimental direct AMDGPU backend. The concrete game research target is GTA VI's `game_scarlett_master.exe`.
 
-**November 26, 2026 checkpoint: the first visible account-selection UI is captured, and original Xbox game shaders have executed directly on the host RDNA2 GPU.** The screenshot shows the account-selection label, `PLAYER` and button prompts. Two separate direct-ISA experiments each validated all 4,096 pixels; a Wine unixlib also executed the first draw inside Wine. A complete menu, world rendering and gameplay remain unverified.
+**November 26, 2026 checkpoint: partial account-selection UI is visible in the game, and separate probes execute original Xbox game shaders directly on the host RDNA2 GPU.** The game/UI path currently uses selected offline shader translations through PC D3D12 and VKD3D-Proton. The direct-ISA probes bypass that translation and each validate all 4,096 pixels; one also runs inside Wine. A complete menu, world rendering and gameplay remain unverified.
 
 ![First visible account-selection UI](screenshots/player_select_first_screen.png)
 
 The screenshot is local visual evidence, not an exact-build GPU readback or proof of the complete game renderer.
 
-The game has advanced beyond the earlier **Game Running / Frame 82** stop: with the null audio endpoint, a recorded 90-second run reached timeout with at least 2,400 resource-backed PresentX calls. The VKD3D fork creates real selected game PSOs and draws. Earlier black-output and watchdog runs are historical; the newer screenshot establishes visible UI text/buttons, while later traces still contain exceptions and unresolved services.
+Current game rendering uses the graphics fork of our **`d3d12_xs` adapter**, backed by PC D3D12 / VKD3D-Proton. It identifies Xbox programs by hash, loads selected translated `.dxil` programs and creates ordinary PC pipeline states. Missing programs can use diagnostic no-op fallback. Native AMDGPU BO-backed XMem is already active in game runs; this memory integration does not switch game draws to original ISA. See [the verified rendering paths](docs/RENDERING_PATHS.md).
+
+The older null-audio run passed the **Game Running / Frame 82** stop and reached a 90-second timeout with at least 2,400 resource-backed PresentX calls. The newer screenshot shows account-selection text/buttons. Watchdog failures still appear in recent traces; neither the timeout nor the screenshot establishes complete rendering or stable gameplay.
 
 This is a source distribution from a separate development workspace, with one explicitly reviewed screenshot. It supplies authored adapters, probes, parsers and build scripts. Original game/SDK/runtime files, shader payloads, generated translations, captures, logs, prefixes and binaries are supplied locally, not in this repository.
 
 - [Current evidence and limitations](docs/STATUS.md)
 - [Build prerequisites and commands](docs/BUILDING.md)
+- [Verified game and direct-ISA rendering paths](docs/RENDERING_PATHS.md)
 - [Direct graphics experiments and next steps](docs/NATIVE_GRAPHICS.md)
 - [Publication selection and synchronization](docs/PUBLICATION.md)
 - [Validation of this export](docs/VALIDATION.md)
@@ -25,12 +28,12 @@ This is a source distribution from a separate development workspace, with one ex
 |---|---|---|
 | Visible UI | Account-selection label, `PLAYER`, button prompts | Supplied screenshot; complete menu/gameplay and exact-build association unverified |
 | Native RDNA2 compute | 1,024/1,024 outputs, guards intact, fence complete | Handwritten compute ISA through raw PM4 |
-| Original game VS + PS | 4,096/4,096 pixels, max error 0 | RECTLIST, linear RGBA8, selected blit pair on Navi21 |
-| Original textured VS + PS | 4,096/4,096 pixels, max error 0 | Matrices through V#, synthetic linear T#, inline sampler; shifted-geometry control fails as expected |
+| Original game VS + PS, standalone | 4,096/4,096 pixels, max error 0 | RECTLIST, linear RGBA8, selected blit pair on Navi21 |
+| Original textured VS + PS, standalone | 4,096/4,096 pixels, max error 0 | Matrices through V#, synthetic linear T#, inline sampler; shifted-geometry control fails as expected |
 | Wine unixlib | M1 open and M1b draw recorded PASS; 4,096/4,096 pixels | Direct AMDGPU execution inside a Wine process |
 | UI translation/readback | 8 programs, 4 pairs, 8 cases, 512 pixels, exit 0 | Selected instruction translations through PC D3D12 |
-| VKD3D graphics bridge | Historical 112 checks, 4 PSOs, 6 cases, 384 pixels, exit 0 | Earlier exact bridge build; later refresh/RECTLIST changes have a different test boundary |
-| Game PSOs | 42 native game PSO creation records in one inspected run | Selected translated programs, not arbitrary native Xbox PSOs |
+| D3D12 adapter bridge using VKD3D | Historical 112 checks, 4 PSOs, 6 cases, 384 pixels, exit 0 | Earlier exact bridge build; later refresh/RECTLIST changes have a different test boundary |
+| Game PSOs | 42 PC PSO creation records from selected game-program translations | Selected translated programs, not arbitrary native Xbox PSOs |
 | Resource127 | Title 79/0, fallback 59/0, GPU readback and guards | Two 3840x2160 backbuffers fit the 64 MiB guest pool |
 | Audio endpoint | 259 checks; WASAPI and spatial callbacks/buffers | Null PCM discards playback; game audio DSP/codecs remain incomplete |
 | Game loop | 90-second timeout, exit 124, PresentX source counter at least 2,400 | No earlier audio writer assertion in that run; no normal game exit or correct image claim |
@@ -45,25 +48,27 @@ Xbox Series CPU code already targets x86-64. The research concentrates on operat
 
 ```mermaid
 flowchart TD
-    Game["Native Xbox executable and libraries"] --> Wine["Wine / Win32"]
-    Wine --> Compat["Xbox API and ABI adapters"]
-    Compat --> Services["XMem / storage / input / audio / runtime"]
-    Compat --> PC["PC D3D12 / selected translated programs"]
+    Game["Native Xbox game executable"] --> Wine["Wine / Win32"]
+    Wine --> Compat["Xbox API / ABI adapters"]
+    Compat --> PC["Selected translated DXIL / PC D3D12"]
     PC --> VKD3D["VKD3D-Proton / Vulkan"]
     VKD3D --> GPU["Host GPU"]
-    Wine --> Unixlib["Experimental xsxgpu unixlib"]
-    Unixlib --> PM4["libdrm_amdgpu / raw PM4 / original ISA"]
+    Compat --> XMem["XMem physical memory"]
+    XMem --> BO["xsxgpu / AMDGPU GTT BO mappings"]
+    Probes["Separate original-ISA probe programs"] --> Native["Linux libdrm or Wine unixlib"]
+    Native --> PM4["Raw PM4 / original Xbox ISA"]
     PM4 --> GPU
 ```
 
-The direct path currently runs probes. Full game command recording, tiled surfaces, native compute integration and presentation interoperability are ongoing work.
+
+The lower direct-ISA path describes separate probe programs. Connecting the game's live command lists to this path is milestone M3. The XMem BO bridge is a memory integration already exercised by game runs.
 
 ## Three source paths
 
 | Path | Role | Build |
 |---|---|---|
 | `compat/d3d12_xs/` | Main Xbox-to-PC D3D12 adapter, resource/heap ABI, frame clock, presentation and diagnostics | `bash compat/build-d3d12_xs.sh` |
-| `local-agent-work/src/d3d12_xs/` | Separate VKD3D graphics fork: selected game PSOs, guest buffer snapshots, descriptor tracking and draw/presentation inspection | `bash local-agent-work/build-dll.sh` |
+| `local-agent-work/src/d3d12_xs/` | Fork of our D3D12 adapter using VKD3D: selected game PSOs, guest buffer snapshots, descriptor tracking and draw/presentation inspection | `bash local-agent-work/build-dll.sh` |
 | `native-gfx/` | Direct AMDGPU Wine unixlib and BO-backed physical-memory experiment | `bash native-gfx/build.sh` |
 
 The fork is intentionally a separate build. The ordinary game runner deploys the main DLL; `compat/run-native-ui-game.sh` deploys the fork after the normal dependencies. Direct ISA execution in `native-gfx` is distinct from the fork's `XSX_DEV_NATIVE_GFX` flag, which uses translated PC shaders.
@@ -101,7 +106,7 @@ compat/
   tools/              Container, PE, translation and trace tools
   reports/            Two retained historical source checkpoints only
 local-agent-work/
-  src/d3d12_xs/       VKD3D graphics fork
+  src/d3d12_xs/       D3D12 adapter fork using VKD3D
 native-gfx/
   src/                Wine PE/unix ABI, draw core, physical/GPU helpers
   EXPERIMENTS.md       Recorded direct-ISA experiment results
@@ -146,9 +151,9 @@ The bridge probe sets `XSX_DEV_GFX_REFRESH=0` because it tests draw-time snapsho
 ## Next milestones
 
 1. Validate the native Wine/sandbox and BO-backed physical-memory paths against the exact current source.
-2. Connect Xbox command recording and resource tables to original ISA execution, including native compute.
+2. Connect live Xbox command recording and resource tables to original ISA execution, including native compute.
 3. Establish real texture layouts, cache synchronization and CPU/GPU visibility; add presentation interoperability.
-4. Diagnose the game watchdog and the black fade data without skipping game assertions.
+4. Resolve recurring watchdog failures, resource-data assertions and incomplete game rendering.
 5. Advance beyond the first visible account-selection UI to a complete menu, correct game frame, input and longer execution. Extend audio DSP/codecs and services separately.
 
 ## Publication and provenance

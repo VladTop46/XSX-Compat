@@ -1,6 +1,10 @@
 # Direct RDNA2 graphics branch
 
-The November25 experiments executed original Xbox game ISA on a Navi21/gfx1030 host through libdrm_amdgpu and raw PM4. This is now a separate research direction alongside the VKD3D selected-translation fork.
+The November25 experiments executed original Xbox game ISA on a Navi21/gfx1030 host through libdrm_amdgpu and raw PM4. This is a separate research direction alongside the `d3d12_xs` adapter fork that uses VKD3D-Proton. [Current game/probe split](RENDERING_PATHS.md).
+
+## Current integration
+
+Game/UI draws still load translated DXIL through PC D3D12/VKD3D. The native branch is already used for BO-backed XMem, while its direct original-ISA draws are invoked by separate probes. The plan for VKD3D to serve only presentation describes the intended native renderer after game command-list integration (M3), not the current game draw path.
 
 ## What executed
 
@@ -41,4 +45,4 @@ The sandbox source has an explicit `XSX_SB_NATIVE_GFX=1` opt-in. It binds this b
 | M5 compute | Execute game dispatches and validate their data dependencies |
 | M6 layouts | Validate Xbox/Navi21 tiling, pipe/bank configuration, DCC, mips and depth |
 
-The earlier fork's black image, zero tint and watchdog remain separate observations. A newer supplied screenshot shows account-selection UI text/buttons, without an exact binary association. Direct execution of selected shaders does not explain those failures or establish a native game renderer.
+Earlier black-image and zero-tint observations remain separate from direct-ISA experiments. Watchdog failures recur in newer game traces. A newer supplied screenshot shows account-selection UI text/buttons, without an exact binary association. Direct execution of selected shaders does not explain those failures or establish a native game renderer.

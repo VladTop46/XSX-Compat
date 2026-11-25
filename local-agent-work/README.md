@@ -1,4 +1,4 @@
-# Selected-program VKD3D graphics fork
+# D3D12 adapter fork using VKD3D-Proton
 
 This directory contains the separate working graphics source from the development workspace. It retains the existing `local-agent-work/src/d3d12_xs/` layout so the integration builders and relative includes resolve without merging the fork into the main adapter.
 
@@ -14,4 +14,4 @@ The source contains corrected pointer-first slot57 descriptions, owned cached PS
 
 To build/run integration probes, separately provide the private captures and frozen program manifest expected by `compat/build-ui-shader-probe.sh` and `compat/build-native-ui-bridge-probe.sh`. The ordinary `compat/sandbox/run-game.sh` deploys the main adapter. `compat/run-native-ui-game.sh` explicitly deploys this fork after normal dependencies.
 
-Historical standalone512-pixel and bridge112-check passes do not establish a correct current game image. The inspected game path created42 selected PSOs and reached real draws; black output and a later watchdog remain unresolved.
+Historical standalone 512-pixel and bridge 112-check passes apply to their exact builds. The game path created 42 selected PC PSOs and reached real draws; the supplied screenshot shows partial account-selection UI. Recent watchdog failures, missing programs and incomplete rendering remain unresolved. See [the verified render paths](../docs/RENDERING_PATHS.md).

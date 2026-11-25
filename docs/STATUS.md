@@ -21,7 +21,9 @@ This document distinguishes recorded development evidence from current source. R
 
 The original game shaders are not supplied. The authored fetch subroutine and compute assembly are supplied. Tiled textures, DCC, depth, general blending, mesh programs, game-native compute, complete command recording and VKD3D interoperability remain open. PSO field interpretations are proven only for the exercised states. M2 overlays also have a documented Wine virtual-memory bookkeeping limitation.
 
-## Game execution and selected-program VKD3D path
+## Game execution: adapter fork using VKD3D-Proton
+
+The live game/UI draw path is the fork of `d3d12_xs` under `local-agent-work/src/d3d12_xs`, using selected offline translations as DXIL through PC D3D12/VKD3D-Proton. Its `GFXNATIVE` name refers to real PC PSOs, not direct submission of Xbox ISA. The direct-ISA experiments are separate programs. Native BO-backed XMem can be enabled at the same time as the translated renderer. [Verified code paths and flag meanings](RENDERING_PATHS.md).
 
 The earlier fatal writer assertion at executable RVA `0x4dcbc9d` was a nonconsuming audio path, not an established graphics upload-capacity problem. Tracing found zero output rings and a lock retained by an early return. Enabling a real null audio endpoint produced a nonnull endpoint/ring, repeated updates and a 90-second run ending in timeout (`124`) without that assertion. Its sampled PresentX source counter reached at least 2,400, missing0. Null PCM discards playback.
 
@@ -31,12 +33,12 @@ Later exact-build checks recorded:
 |---|---|
 | UI readback:8 programs /4 pairs /8 cases /512 pixels, exit0 | Selected translated VS/PS execute with controlled buffers, textures and blending |
 | Bridge:112 checks /4 PSOs /6 cases /384 pixels, exit0 | Earlier pointer-first PSO description and first-child vtable initialization verified |
-| Game:42 native PSO success records | Real selected translated PSOs created in the game path; not general Xbox PSO support |
+| Game:42 PC PSO success records | Selected translated game programs; original ISA is used to identify programs, not submitted directly by this path |
 | Draw A offscreen -> Draw B sampled resource -> PresentX | Resource identity chain inspected; a visible magenta diagnostic marker corroborated target-to-window routing |
 | Viewport/scissor | Exercised slots21/22 accepted the observed PC layout |
 | Earlier game image | Black in earlier inspected runs; draw A's96-byte constant buffer held zero tint at recording and submit |
 | Latest visual evidence | Supplied screenshot shows account-selection UI text/buttons; exact source/binary association is not pinned |
-| Earlier known game stop | Watchdog at executable RVA `0x2215c35`; cause of the stalled heartbeat remains unresolved |
+| Recurring game stop | Watchdog at executable RVA `0x2215c35`, also present in the newer `game-native-ui-005846.log`; heartbeat stall remains unresolved |
 
 The fork now contains RECTLIST expansion and submit-time guest buffer refresh. Its snapshot probe deliberately disables refresh; a recorded refresh-on probe failed after rereading mutated fixture memory. Do not attribute the earlier 112/0 to the later game refresh policy. The latest fork is experimental, not a fully validated renderer. New logs `game-native-ui-003345.log` and `game-native-ui-003613.log` contain changed VB/IB refresh records; their sampled cumulative stale-range counts are 230 and 461 at 2,000 submissions. Stale draw-time data is now observed for those ranges, without proving general GPU coherence. `game-native-ui-003845.log` also records a first-chance breakpoint at executable RVA `0x4ffd879`; its final exit/cause is not established by that line.
 
@@ -59,7 +61,7 @@ The fork now contains RECTLIST expansion and submit-time guest buffer refresh. I
 
 XCRDAPI source now scatters plain/zlib requests to physical destinations through the new XMem `XsxPhysWrite` export. This is newer source, separate from the historical 20/20 storage result; the newer inspected game logs contain `dstPhys OK` records with native XMem/AMDGPU active. Those log records demonstrate the exercised path, not a complete storage correctness/readback test. BCpack, swizzle and physical sources remain unsupported.
 
-GameInput now implements a keyboard-driven virtual pad and UI navigation. The GameRuntime proxy includes a local offline XUser provider and logging. Their presence is a source result; passing gameplay, complete callbacks and real online identity are not established here.
+GameInput implements a keyboard-driven virtual pad/UI navigation and is polled by the game in inspected logs. The local offline XUser provider is also exercised. This does not establish complete input callbacks, gameplay or real online identity. The handoff additionally reports a later internal Game Running/frame counter; no world-rendering claim is inferred from that report.
 
 ## Preserved regressions
 
@@ -72,3 +74,12 @@ The preserved [62-check graphics snapshot](../compat/reports/graphics-resume-202
 Validate sandbox/native memory against current binaries, then native Xbox list recording, descriptor formats, texture layouts and visibility. Resolve the watchdog and actual image contents. A complete game frame/menu, gameplay, audio DSP and successful original FFX context each require their own proof; no such result is claimed by a timeout or source synchronization.
 
 The latest exported fork also has an opt-in `XSX_NO_WATCHDOG=1` debugging override of the game's watchdog flag. It was not enabled by this synchronization or the FFX smoke. Runs using it cannot establish that the underlying heartbeat stall is fixed.
+
+
+## Latest documentation audit
+
+The newer game logs contain both native XMem activation and translated-cache PSO creation. `game-native-ui-003613.log` contains 42 selected PC PSO creation records and actual draw/refresh activity. The deployed private game cache contains eight DXIL programs. Uncached shader pairs and bootstrap no-op fallback remain part of the bring-up configuration. Game compute dispatches in this mode use the bootstrap compute PSO.
+
+Selected profiler windows in that log report 29.6/30.1 PresentX calls per second. The profiler increments at PresentX entry; these are presentation-loop cadence measurements, not validated complete-game rendering FPS. A later diagnostic run (`004939`) stalls after its first PresentX. The watchdog also recurs in `005846`; it was inaccurate to classify watchdog failures as exclusively historical.
+
+No new game/GPU run was performed for this documentation audit. The direct-ISA readback results remain their own recorded experiments. [RENDERING_PATHS.md](RENDERING_PATHS.md) provides the submission wording and source references.

@@ -1,10 +1,10 @@
-> Public export checkpoint, November 26, 2026: this source includes the opt-in
-> sandbox hook (`XSX_SB_NATIVE_GFX=1`), M2 BO mapping helpers/probe and the
-> XMem hook (`XSX_NATIVE_GFX=1`). M1/M1b are recorded passes; newer game
-> logs show native XMem activation and successful physical-destination
-> storage records. Standalone M2 probe success and a complete native game
-> renderer are not established. The roadmap below is the earlier note.
-> See [current status](../docs/STATUS.md) and [build notes](../docs/BUILDING.md).
+> Current integration audit, November 26, 2026: game/UI draws still use selected
+> translated DXIL through our d3d12_xs adapter fork and VKD3D-Proton.
+> Native AMDGPU BO-backed XMem is exercised by game runs. Original Xbox ISA
+> executes directly in separate Linux/Wine probes; live game command-list
+> integration is M3. The statement below about VKD3D serving only display is
+> the intended architecture, not the current game renderer.
+> See [verified paths](../docs/RENDERING_PATHS.md) and [current status](../docs/STATUS.md).
 
 # native-gfx — ветка «нативное исполнение Xbox-графики на хост-RDNA2» (с 25.11.2026)
 

@@ -83,3 +83,10 @@ A screenshot appeared in the public directory during synchronization. Its accoun
 The fork was synchronized once more after a concurrent resource-Map edit and rebuilt successfully. The main adapter and unchanged probes retain their immediately preceding build/test results.
 
 The final exported fork, including the default-off watchdog debugging helper, compiled successfully. Its source SHA-256 is `42696f2a206d8308baab1b73524810a7f292c78f81d9c941032b985a0fb22ae8`. The workspace comparison reported zero source differences immediately after this build.
+
+
+## Rendering-path documentation audit
+
+The game draw path and original-ISA probe path were traced separately through source, runner flags and fresh private logs. The audit confirmed translated DXIL -> PC PSO -> PC draw/queue submission for the game, and `probe.c` -> `xsxgpu_exp2` -> raw PM4 for the Wine original-ISA experiment. Native XMem activation is independent of shader submission. Recent logs also show recurring watchdog/stall failures, so the README no longer classifies them as exclusively historical.
+
+This audit changes documentation and the reviewed native-roadmap annotation only; adapter implementations and runtime binaries are unchanged. The public implementation remains its existing source checkpoint, while private development continues. The preceding compilation/test results are not new GPU runs. Local links, source references, final provenance and the publication manifest were checked again. [Verified paths and submission wording](RENDERING_PATHS.md).

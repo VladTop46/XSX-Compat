@@ -242,3 +242,10 @@ XSX_GRAPHICS=1 WINEDEBUG=-all ./compat/run-test.sh tests/03-fidelityfx/ffx-conte
 The historical failure remains native PSO (`0x8000000D`, process8). A failure before test entry is an environment failure, not a new FFX result. The selected translation bridge probe uses `XSX_DEV_GFX_REFRESH=0` to retain its draw-time snapshot contract; the game uses submit-time refresh by default. Do not compare those as equivalent coherence tests.
 
 The fork also carries `XSX_NO_WATCHDOG=1` as an opt-in debugging flag. It changes a game flag to bypass the watchdog; leave it unset for ordinary stability evidence. Source synchronization does not enable it.
+
+
+## Which shader path the game command selects
+
+`compat/run-native-ui-game.sh` exports `XSX_DEV_NATIVE_GFX=1` and `XSX_DEV_NOOP_PSO=1`. This selects our D3D12 adapter fork's translated DXIL cache and allows diagnostic no-op fallback. It does not select original-ISA game draws. `XSX_NATIVE_GFX=1` adds native BO-backed XMem, and `XSX_SB_NATIVE_GFX=1` exposes its local Wine unixlib/build/data to the sandbox. The direct draw export `xsxgpu_exp2` is called by `native-gfx/src/probe.c`, independently of the game renderer. See [RENDERING_PATHS.md](RENDERING_PATHS.md).
+
+The current private candidate and the old bridge-probe DLL may differ. The default runner checks equality and refuses that combination. `XSX_RUN_DLL` can explicitly select an experimental candidate, but such a run does not inherit the older bridge probe's runtime validation.

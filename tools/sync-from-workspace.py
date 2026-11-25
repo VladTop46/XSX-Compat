@@ -22,13 +22,7 @@ FAMILIES = ('compat/d3d12_xs', 'compat/runtime', 'compat/stubs', 'compat/tests',
 BLOCKED = {'__pycache__', 'build', 'logs', 'data', 'isa', 'shader-cache', 'analysis', '.git'}
 EXTRA = ('local-agent-work/build-dll.sh', 'native-gfx/build.sh', 'native-gfx/README.md',
          'native-gfx/EXPERIMENTS.md', 'compat/tests/native-isa/README.md')
-NATIVE_NOTE = ('> Public export checkpoint, November 26, 2026: this source includes the opt-in\n'
-               '> sandbox hook (`XSX_SB_NATIVE_GFX=1`), M2 BO mapping helpers/probe and the\n'
-               '> XMem hook (`XSX_NATIVE_GFX=1`). M1/M1b are recorded passes; newer game\n'
-               '> logs show native XMem activation and successful physical-destination\n'
-               '> storage records. Standalone M2 probe success and a complete native game\n'
-               '> renderer are not established. The roadmap below is the earlier note.\n'
-               '> See [current status](../docs/STATUS.md) and [build notes](../docs/BUILDING.md).\n\n')
+NATIVE_NOTE = '> Current integration audit, November 26, 2026: game/UI draws still use selected\n> translated DXIL through our d3d12_xs adapter fork and VKD3D-Proton.\n> Native AMDGPU BO-backed XMem is exercised by game runs. Original Xbox ISA\n> executes directly in separate Linux/Wine probes; live game command-list\n> integration is M3. The statement below about VKD3D serving only display is\n> the intended architecture, not the current game renderer.\n> See [verified paths](../docs/RENDERING_PATHS.md) and [current status](../docs/STATUS.md).\n\n'
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
