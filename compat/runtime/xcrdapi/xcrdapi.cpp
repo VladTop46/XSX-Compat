@@ -109,9 +109,34 @@ static HRESULT ReadSource(const Entry& e, std::vector<uint8_t>& tmp)       // и
 static HRESULT DoRequest(Queue* q, Entry& e)
 {
     const Request& r = e.req;
+    // Destination = list of 64 KiB physical page ids (+ byte offset): decode to a temporary buffer,
+    // then scatter through xmem.dll!XsxPhysWrite (works for section- and GPU-BO-backed pages).
+    if (r.options.o.destPhys && !r.options.o.bcpack && !r.options.o.swizzle && !r.options.o.srcPhys) {
+        typedef BOOL (*PhysWriteFn)(const uintptr_t*, uint64_t, const void*, uint64_t);
+        static PhysWriteFn physWrite = (PhysWriteFn)GetProcAddress(LoadLibraryA("xmem.dll"), "XsxPhysWrite");
+        if (!physWrite || !r.destination) return E_DS_UNSUPPORTED;
+        std::vector<uint8_t> src; HRESULT hr = ReadSource(e, src); if (FAILED(hr)) return hr;
+        std::vector<uint8_t> out(r.destSize);
+        size_t n = r.destSize;
+        if (r.options.o.zlib) {
+            size_t got = tinfl_decompress_mem_to_mem(out.data(), out.size(), src.data(), src.size(), TINFL_FLAG_PARSE_ZLIB_HEADER);
+            if (got == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) { n = r.destSize; int rc = infl::inflate_zlib(src.data(), src.size(), out.data(), &n);
+                if (rc) { DLOG("request '%s' dstPhys zlib rc=%d", e.name.c_str(), rc); return HRESULT_FROM_WIN32(ERROR_INVALID_DATA); } }
+            else n = got;
+        } else { n = src.size() < out.size() ? src.size() : out.size(); memcpy(out.data(), src.data(), n); }
+        if (!physWrite((const uintptr_t*)r.destination, r.destPageOffset, out.data(), out.size())) return E_FAIL;
+        static std::atomic<long> k{0}; if (k++ < 8) DLOG("request '%s' dstPhys OK pages[0]=%#llx off=0x%llx size=%llu inflated=%zu", e.name.c_str(),
+            (unsigned long long)((const uintptr_t*)r.destination)[0], (unsigned long long)r.destPageOffset, (unsigned long long)r.destSize, n);
+        return S_OK;
+    }
     if (r.options.o.bcpack || r.options.o.swizzle || r.options.o.destPhys || r.options.o.srcPhys) {
         DLOG("request '%s' UNSUPPORTED options=0x%llx (bcpack=%d swz=%d dstPhys=%d srcPhys=%d)", e.name.c_str(), (unsigned long long)r.options.asU64,
              (int)r.options.o.bcpack, (int)r.options.o.swizzle, (int)r.options.o.destPhys, (int)r.options.o.srcPhys);
+        { static std::atomic<int> dn{0}; if (dn++ < 12) { uint64_t q[4] = {}; const bool rd = r.destination && !IsBadReadPtr(r.destination, 32);
+            if (rd) memcpy(q, r.destination, 32);
+            DLOG("  dstPhys detail: dest=%p pageOff=0x%llx destSize=%llu src=%llu inter=%llu dest[0..3]=%s %llx %llx %llx %llx",
+                 r.destination, (unsigned long long)r.destPageOffset, (unsigned long long)r.destSize, (unsigned long long)r.sourceSize,
+                 (unsigned long long)r.intermediateSize, rd ? "" : "(unreadable)", (unsigned long long)q[0], (unsigned long long)q[1], (unsigned long long)q[2], (unsigned long long)q[3]); } }
         return E_DS_UNSUPPORTED;
     }
     if (r.destPageOffset) { static std::atomic<int> k{0}; if (k++ < 8) DLOG("request '%s' destPageOffset=0x%llx НЕ учитывается (dest=%p size=%llu)", e.name.c_str(), (unsigned long long)r.destPageOffset, r.destination, (unsigned long long)r.destSize); }

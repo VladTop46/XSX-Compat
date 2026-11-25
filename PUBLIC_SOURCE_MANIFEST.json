@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "scope": "UTF-8 source-only publication; excludes .git",
+  "scope": "Authored UTF-8 source and explicitly reviewed screenshot; excludes .git",
   "files": [
     {
       "path": ".gitattributes",
@@ -9,23 +9,33 @@
     },
     {
       "path": ".gitignore",
-      "size": 1173,
-      "sha256": "bf3f8a5f206cf41690d313d1e73afd5264f87b43d5aad54a6a25cfa735a79f9b"
+      "size": 1965,
+      "sha256": "62eda4bfa3a6b8a2f2449e62175293ebc2b2ac6af67c1f2c35258443995a67f4"
     },
     {
       "path": "README.md",
-      "size": 60919,
-      "sha256": "0c303a70e4881652092cf5a62ec4394396480bb0d912ae3e254ebb44460f1e6a"
+      "size": 12628,
+      "sha256": "33448af269f9b1a8aa1d9fdc66534fac0d8450ddebe944097e5a7466946af5a2"
     },
     {
       "path": "THIRD_PARTY.md",
-      "size": 2761,
-      "sha256": "b517e268ea9f12eb1d2022f5fb9b4cd80dde29be2d0378b3ccb418044543d535"
+      "size": 3222,
+      "sha256": "f2b933fc264a29fc56431a25ab398c654ee44016178cf1850c11486518840422"
+    },
+    {
+      "path": "compat/build-audio-output-probe.sh",
+      "size": 355,
+      "sha256": "39383a1efd48c43c40413e89658264293fab497543778223a90f59cb302bd853"
     },
     {
       "path": "compat/build-audio.sh",
       "size": 400,
       "sha256": "9d2cc9e1cd2f3f0c496659257ad0f1a2baf5a298874df33cc545122c25ffa9cb"
+    },
+    {
+      "path": "compat/build-buffer127-probe.sh",
+      "size": 456,
+      "sha256": "31bf47534b081b9dcafe87bf8017351ac6128ba71af8975c026fbc79314b8fab"
     },
     {
       "path": "compat/build-d3d12_xs.sh",
@@ -38,9 +48,24 @@
       "sha256": "9131e27333a5750d0631094db0fc08e44bb0b6e8adc341db57134bc5b585eb98"
     },
     {
+      "path": "compat/build-frame-events-probe.sh",
+      "size": 529,
+      "sha256": "6f5290c192a0d74ab26060c132f3eb4f4b9bf6e03921bdd759b82eabbaccd010"
+    },
+    {
+      "path": "compat/build-gameinput.sh",
+      "size": 444,
+      "sha256": "b03a0c98854aa1fc932997b2f8658ce476aecf3189d02c00f69e73b24a9fa193"
+    },
+    {
       "path": "compat/build-native-cs-probe.sh",
       "size": 1277,
       "sha256": "2b9a60343ac25ee1c3bc0a138b4f8b03f3c6cf3bccceca39e39374eb7c6a121a"
+    },
+    {
+      "path": "compat/build-native-ui-bridge-probe.sh",
+      "size": 3216,
+      "sha256": "0aac3dca2e8dab2fb606d1c0142630e3d2a4b5a9b2cd8a10f842432966ef6905"
     },
     {
       "path": "compat/build-native-vs-probe.sh",
@@ -48,9 +73,29 @@
       "sha256": "0f83e595f55336b4bedd84812b6de0ebdf8b8896eac6b60d0c8ab1466446bcfa"
     },
     {
+      "path": "compat/build-resource127-probe.sh",
+      "size": 753,
+      "sha256": "db30b208c127df3036e5a136b42a76a77cb2bc0b8e4303d8f1095b22020ced9f"
+    },
+    {
       "path": "compat/build-services-probes.sh",
       "size": 1212,
       "sha256": "c7f4cf4ac2d804d655db0eeaca7842766e45c9410efe13de0b4dc0d98b5dec5b"
+    },
+    {
+      "path": "compat/build-surface-blit-probe.sh",
+      "size": 619,
+      "sha256": "a32cdfde019f55bc195927054ef0373137d010c7d3159dd9ca8b14d02fac8745"
+    },
+    {
+      "path": "compat/build-task-trace-probe.sh",
+      "size": 345,
+      "sha256": "1e425da77d3c057f17a8f79dafe7ac41dbf0114a0ad7298b3cf6e2ed580e23a5"
+    },
+    {
+      "path": "compat/build-ui-shader-probe.sh",
+      "size": 2873,
+      "sha256": "811566b1c12963d0c7d4cb5c65c2e3d1485dcc6d978c75f09c0e202bb026644c"
     },
     {
       "path": "compat/build-xcrdapi.sh",
@@ -61,6 +106,11 @@
       "path": "compat/build-xgr_proxy.sh",
       "size": 596,
       "sha256": "137aaf8f520b6fdc3e6c54a00099e2744df9f3e3d4f4da27fef3a6e361f0672a"
+    },
+    {
+      "path": "compat/build-xmem-neighbor-probe.sh",
+      "size": 413,
+      "sha256": "3e326c59fae49cdd8fb01f86b847796cb31fb02c5c8adec3ac06d07dc73c2a2a"
     },
     {
       "path": "compat/build-xmem.sh",
@@ -74,8 +124,8 @@
     },
     {
       "path": "compat/d3d12_xs/d3d12_xs.cpp",
-      "size": 123789,
-      "sha256": "65d5ae20ee0524720422b7cdf5f2335f8916220c616c2c400e684b83eb3fa876"
+      "size": 183834,
+      "sha256": "53f194beb3cfc72a600c14c5a873956229f439644697bf19017a7c7bdf6aa7f3"
     },
     {
       "path": "compat/d3d12_xs/d3d12_xs.def",
@@ -93,9 +143,74 @@
       "sha256": "465eb68c2f4ccb1bcba75b2577eed45baa8a3d7909a516357a81ffeb84140740"
     },
     {
+      "path": "compat/d3d12_xs/frame_clock.h",
+      "size": 4165,
+      "sha256": "2d50f2e694d3456cb65e706d2e93110171dd717ae11be94c4830e8a14f52987a"
+    },
+    {
+      "path": "compat/d3d12_xs/gfx_blend.h",
+      "size": 3595,
+      "sha256": "ebac9862bae445dbe2aafd348fedd57a6289ef3d213f517911e8303b15d9a200"
+    },
+    {
+      "path": "compat/d3d12_xs/gfx_buffer_descriptor.h",
+      "size": 1332,
+      "sha256": "2885ea62515c3553e92d3a0b89084d0dbab427022d0bf5fe7f03351fcb5e0496"
+    },
+    {
+      "path": "compat/d3d12_xs/gfx_input_layout.h",
+      "size": 1665,
+      "sha256": "59392375220a1e3ca888819b1d81310d2960b47de9c20a57c468d865c8abd703"
+    },
+    {
+      "path": "compat/d3d12_xs/guest_footprint.h",
+      "size": 1913,
+      "sha256": "4d1c741c062260b65082b8db9cb60b15c2ad53ca3676428cd243df2a23685e52"
+    },
+    {
+      "path": "compat/d3d12_xs/guest_shadow.h",
+      "size": 5596,
+      "sha256": "2a65609e63e6b4818f94d47fd198c6cfd7f4994581327cdd3c2c805869e4c44b"
+    },
+    {
+      "path": "compat/d3d12_xs/instruction_resume.h",
+      "size": 867,
+      "sha256": "65b77f6512c5e4e34ec91723002fe9c662a2427bc0f34665165e3c276bfd66fe"
+    },
+    {
+      "path": "compat/d3d12_xs/list_writes.h",
+      "size": 5291,
+      "sha256": "3e1cdd26e7eed90d7e5645efc36270ac76c582b2eb850a6e3f8a0f9007bd001f"
+    },
+    {
       "path": "compat/d3d12_xs/native_pso_capture.h",
       "size": 3457,
       "sha256": "0691c60947dc778c882473f7b98cc7f5068eb1466e6266c1898809c96950adb5"
+    },
+    {
+      "path": "compat/d3d12_xs/persistent_trace.h",
+      "size": 6316,
+      "sha256": "ba56c897274bda2fe8f5780cf1d91875279ca6439916d5ea1e30f08319fb129d"
+    },
+    {
+      "path": "compat/d3d12_xs/return_trace.h",
+      "size": 5652,
+      "sha256": "16ec46f0414692be9d91e32db30b36f48b8721c32f0448ca4f2cb78e7bc01c2d"
+    },
+    {
+      "path": "compat/d3d12_xs/surface_blit.h",
+      "size": 9987,
+      "sha256": "cbc81e5db2f0d8dbd8c02b34916d0a07c6afe6abf6c973ad4a2275b92a3d541e"
+    },
+    {
+      "path": "compat/d3d12_xs/writer_fault.h",
+      "size": 3214,
+      "sha256": "e80d83358354b174a98fe8eb5912c346a6df8968f24729f1e87e27b8e47f147b"
+    },
+    {
+      "path": "compat/d3d12_xs/writer_task_trace.h",
+      "size": 9477,
+      "sha256": "f2758403f04f0c11fe48266795f007fe7d29ed0e11323e828d232a995b15bd07"
     },
     {
       "path": "compat/ffx_min/ffx_min.cpp",
@@ -173,14 +288,54 @@
       "sha256": "1fb9e55db0fba07eeebebedbbb4f155c18eea45ce8fa20dc577381812bbe0a76"
     },
     {
+      "path": "compat/run-audio-null-cpu.sh",
+      "size": 391,
+      "sha256": "28ea6c0a927f54e75c54abe7d021c0615ecec94350ac5dadcd9463356d7c3853"
+    },
+    {
+      "path": "compat/run-audio-output-probe.sh",
+      "size": 568,
+      "sha256": "20ae0dc3669fec4791d3881481469e5f973830736116c16db9f571da4da64a50"
+    },
+    {
+      "path": "compat/run-native-ui-bridge-probe.sh",
+      "size": 682,
+      "sha256": "c81f31457164f6e962d211b2d71a1e90715990397620de2f91750ecae0ff00e0"
+    },
+    {
+      "path": "compat/run-native-ui-game.sh",
+      "size": 2649,
+      "sha256": "731ff0da31a6f3d2189ed09919e3382f118a4fc7afa2cd6eb198d3af7f914dd5"
+    },
+    {
+      "path": "compat/run-resource127-probes.sh",
+      "size": 636,
+      "sha256": "e33a002bd1a9b651cc4c15bf438fc9e7931c5fda19cf51b73607a8ecaba4d0d6"
+    },
+    {
       "path": "compat/run-services-probes.sh",
       "size": 824,
       "sha256": "a95f5c68855bb294d1ba55b65cabcfaa1ecba9ae78638879f1ad57d7faa16a90"
     },
     {
+      "path": "compat/run-task-trace-cpu.sh",
+      "size": 1518,
+      "sha256": "f7040120b930438ead24bc4262a1970214631c9c866f40bdfed9aa73c4412e56"
+    },
+    {
       "path": "compat/run-test.sh",
       "size": 850,
       "sha256": "abf922b06fa90a1c406215353336d4210953389d660920d68dcb2043aa00b410"
+    },
+    {
+      "path": "compat/run-ui-shader-probe.sh",
+      "size": 379,
+      "sha256": "9635116c7717fd576fa97bb0fffe1f312813123a8c151b6bfbbe1b3c2c6076bf"
+    },
+    {
+      "path": "compat/run-xmem-neighbor-probe.sh",
+      "size": 452,
+      "sha256": "2991f475d13292a80400fde45ed3be079b2bbc00a730d422ca405c682098064f"
     },
     {
       "path": "compat/runtime/audio/acphal.cpp",
@@ -199,8 +354,8 @@
     },
     {
       "path": "compat/runtime/gameinput/gameinput.cpp",
-      "size": 4955,
-      "sha256": "02289d5d77c345ff993b00db44c5a77afe9d2c903ac503b0d426197b71c8e526"
+      "size": 13729,
+      "sha256": "e0f2f09d47e830d1cec5a4daa73eee0873c3529c3fd967da18d3cf4528170dd1"
     },
     {
       "path": "compat/runtime/gameinput/gameinput.def",
@@ -239,8 +394,8 @@
     },
     {
       "path": "compat/runtime/xcrdapi/xcrdapi.cpp",
-      "size": 24492,
-      "sha256": "45199f0e8fc8979ebfe16f49e4c913105e7033f40ceb5f8af72b391bf88bcc7b"
+      "size": 26897,
+      "sha256": "c3e117e4c3e336a1d3b005da06df10031a417f5bdbe23f549aa7a9d67f5805f8"
     },
     {
       "path": "compat/runtime/xcrdapi/xcrdapi.def",
@@ -259,8 +414,8 @@
     },
     {
       "path": "compat/runtime/xgr_proxy/xgr_proxy.cpp",
-      "size": 13830,
-      "sha256": "88014a73d8df629e226a86c0ce56b3b9f6ec758ca74af9e1971dc3f177c5edf4"
+      "size": 26810,
+      "sha256": "c01c0011e32cfcd655f0de0bbabcc41692b2cf3f3feb02b5b2ba31a0a6cf4707"
     },
     {
       "path": "compat/runtime/xgr_proxy/xgr_proxy.def",
@@ -269,18 +424,23 @@
     },
     {
       "path": "compat/runtime/xmem/phys.h",
-      "size": 11105,
-      "sha256": "e741ef6ca9a6e1e825c0f74311e82611bf406eec4ec691eb94c9934bfeede83f"
+      "size": 14587,
+      "sha256": "9fa76faae64303143bd83d5cc653e1e6a2854beb05957071c1e2b2d60ca13adc"
     },
     {
       "path": "compat/runtime/xmem/xmem.cpp",
-      "size": 10306,
-      "sha256": "e11c2ba01e7a23919ba2d86f6f1031d7b76c5c78d8c4d267edb4641f632e7349"
+      "size": 11808,
+      "sha256": "372a6fc2dcd0bfde812a921c2a7e4509c09e8215e587d34c2f1faf02b515dd39"
     },
     {
       "path": "compat/runtime/xmem/xmem.def",
-      "size": 331,
-      "sha256": "1fb9e55db0fba07eeebebedbbb4f155c18eea45ce8fa20dc577381812bbe0a76"
+      "size": 348,
+      "sha256": "4fdcc40a583119c0e18fb86ec802dd75d9d1b1c4593fcf68c6a03b8609688ebd"
+    },
+    {
+      "path": "compat/sandbox/audio-null.conf",
+      "size": 214,
+      "sha256": "a440b5b0480a431b26c7d181e8515ff21b85de087fd34ad9dcfc2c1b7715c674"
     },
     {
       "path": "compat/sandbox/dbg-int3.sh",
@@ -304,8 +464,8 @@
     },
     {
       "path": "compat/sandbox/xsx-sandbox.sh",
-      "size": 4663,
-      "sha256": "b92e19477501463dc52eb036d4a9078af6a250f45db3a79eaba33c47949dc157"
+      "size": 6214,
+      "sha256": "71163a6a2871bacf70fd0c857011fd8d9ddb8fa390c4fefc4c09deebe1b28b8c"
     },
     {
       "path": "compat/stubs/AcpHal.cpp",
@@ -348,6 +508,11 @@
       "sha256": "e47b582cbc54a762d6e8ad85196d0f9ea8db35dd154202dd3792d171585929c2"
     },
     {
+      "path": "compat/tests/alsa-null-probe.cpp",
+      "size": 1772,
+      "sha256": "760030cb07fa4e0168c4e255c301b45c3c430d9634e58bba4c7a34db0a156c34"
+    },
+    {
       "path": "compat/tests/apu-memory-test.cpp",
       "size": 2969,
       "sha256": "3b32604ccce232137645382a940657d0a0cd64029b6dcfb10f14ec7f3937fec4"
@@ -356,6 +521,16 @@
       "path": "compat/tests/apu-runtime-probe.cpp",
       "size": 3403,
       "sha256": "934a4bdd20d897eeb1609f88c1c47c152b77c87e528fb4c2be2212236ab65088"
+    },
+    {
+      "path": "compat/tests/audio-output-probe.cpp",
+      "size": 10579,
+      "sha256": "ab71864d428d140b7ad172710aa43f444d9fae54a49ece2b984f8afcfce8c3c8"
+    },
+    {
+      "path": "compat/tests/buffer127-probe.cpp",
+      "size": 10175,
+      "sha256": "f3446df16b86623d128735e586641a2913b6c46b5fe0a4213298b5512f0dc659"
     },
     {
       "path": "compat/tests/census-device-slots.py",
@@ -393,6 +568,21 @@
       "sha256": "10b63eac5130f406dfc441e7d23c924fc4a3342ba9a1f4ccb294100328db5b33"
     },
     {
+      "path": "compat/tests/frame-clock-test.cpp",
+      "size": 6626,
+      "sha256": "b023c2aa0a60e5b6a3f2b5df4b59715aa5832ad4b28a66d1c84b6c9a271ff333"
+    },
+    {
+      "path": "compat/tests/frame-event-probe.cpp",
+      "size": 3413,
+      "sha256": "5a4aee08498072028da7f747771587e164577d5dddf7e7516591a328a00c4183"
+    },
+    {
+      "path": "compat/tests/frame-statistics-probe.cpp",
+      "size": 1638,
+      "sha256": "34c2481e952246f204c662ab6740d538af21fe7b68f35f03a469bea154f99b41"
+    },
+    {
       "path": "compat/tests/game-import-probe.cpp",
       "size": 4654,
       "sha256": "c012f091f572028643f104473a1370df105176d14101e3b1ffae06862087e622"
@@ -401,6 +591,26 @@
       "path": "compat/tests/gen-zlib-testdata.py",
       "size": 883,
       "sha256": "9a498de52d9bb55602c1bc1813dec108a5329affdc17217fc1d25020b2caf641"
+    },
+    {
+      "path": "compat/tests/gfx-buffer-descriptor-cpu.cpp",
+      "size": 1888,
+      "sha256": "84bab237394a7cb589e833dfbef6e843565f62914abe7f94f45189cc3b1a11d4"
+    },
+    {
+      "path": "compat/tests/gfx-input-layout-cpu.cpp",
+      "size": 2475,
+      "sha256": "6b24230437ee1f48a12ee8e30a0e560e9e47de431da15e51950b15e5b75c2180"
+    },
+    {
+      "path": "compat/tests/gfx-pso-description-cpu.cpp",
+      "size": 4948,
+      "sha256": "c5c6fdca526325db66500b1d1a2f444c051ced7d8986212c5aabdccd92745670"
+    },
+    {
+      "path": "compat/tests/guest-footprint-test.cpp",
+      "size": 2926,
+      "sha256": "c1dcca2fdca8efacdbd6e964b7602a8258edb02dd673472a4ceeb0045b3027b7"
     },
     {
       "path": "compat/tests/hello.cpp",
@@ -433,9 +643,69 @@
       "sha256": "e90f6a59741c74b838339f95e5f7869a1eac855780520dc8ecfe5cb3b5950b16"
     },
     {
+      "path": "compat/tests/list-reset-probe.cpp",
+      "size": 6916,
+      "sha256": "733f9339b8c6f868bee25831936cc61501c2ef65b69865e4e020b82e91a24d9a"
+    },
+    {
+      "path": "compat/tests/list-write-probe.h",
+      "size": 2459,
+      "sha256": "b5cf25d3f912079444053cef9be4bee8d0fa2a40fac32077360c3b2ec44078c3"
+    },
+    {
       "path": "compat/tests/native-cs-pso.cpp",
       "size": 5259,
       "sha256": "9736bac685e1595910761ad8cf5f6554d5be4abef881c0bd84fc6e1a066033d0"
+    },
+    {
+      "path": "compat/tests/native-isa/README.md",
+      "size": 3029,
+      "sha256": "e2c1d84dbcd4a9bb171549bcdc790a2c01a7518b550614c1c76d8ba349d5e8e2"
+    },
+    {
+      "path": "compat/tests/native-isa/bo-fixed.c",
+      "size": 2364,
+      "sha256": "b3055d9099549050ec83db6c15d778b5e3ad4286e3bf71c256cf8ddf77d0f0b9"
+    },
+    {
+      "path": "compat/tests/native-isa/extract-isa.py",
+      "size": 1206,
+      "sha256": "3e8ac1c2db4896229b5d637b8d3031bd62a87b9e8d7645e9df813d7621e46d47"
+    },
+    {
+      "path": "compat/tests/native-isa/fetch.s",
+      "size": 721,
+      "sha256": "22867276303fdc998b1e17ab3d59012a51bd6a045e5edf3a86e2d1d11f9274ef"
+    },
+    {
+      "path": "compat/tests/native-isa/raw-dispatch.c",
+      "size": 6903,
+      "sha256": "b93ac34492fb192f825e4c4663c1bb729b30ed9a84c3000653fb1621f100e95e"
+    },
+    {
+      "path": "compat/tests/native-isa/raw-draw.c",
+      "size": 14108,
+      "sha256": "7843b42485cfe0b835cbcf58e4aee297d6431d8ed97ef13f28f838d9e7563c4a"
+    },
+    {
+      "path": "compat/tests/native-isa/raw-tex.c",
+      "size": 15538,
+      "sha256": "b53ae6ddfe1f00f41d489fdf8e45e21461219fd9e2005d12778de75875ef36fb"
+    },
+    {
+      "path": "compat/tests/native-isa/store.s",
+      "size": 341,
+      "sha256": "dcb0cebb4a2825e9fc9d3d6b4d2d323ab7168451096809c6ef2448d35319ef24"
+    },
+    {
+      "path": "compat/tests/native-isa/userptr-shared.c",
+      "size": 1898,
+      "sha256": "1c0777c1e95eb6b5ff3d64b8d6a1d377b88a594520df1cfd06db1b411f96cd43"
+    },
+    {
+      "path": "compat/tests/native-ui-bridge-probe.cpp",
+      "size": 14517,
+      "sha256": "e7e3b3759a4efe2d8fbe75416a1bf8aa3944eaca8e41b8f08cb9f3e2d66f6eef"
     },
     {
       "path": "compat/tests/native-vs-pso.cpp",
@@ -448,6 +718,16 @@
       "sha256": "f6da468aa81de0353c108b0039178a918b997da8e44e9db7e694e50a589b9d79"
     },
     {
+      "path": "compat/tests/phys-model/windows.h",
+      "size": 850,
+      "sha256": "64dd934eba5b424ba8a5629cb988589aa43a8ee3066dac896033239241f4bdbb"
+    },
+    {
+      "path": "compat/tests/phys-neighbor-model.cpp",
+      "size": 4952,
+      "sha256": "4cebb70491baf7a8fd078f4871c43a35be9469aeaba50357b86e7c537bf63ed1"
+    },
+    {
       "path": "compat/tests/placeholder-probe.cpp",
       "size": 1805,
       "sha256": "aa36008ab856be05b082b7d2253814c9b4e3868dab0f42a75d3b884a4e98fd9d"
@@ -456,6 +736,21 @@
       "path": "compat/tests/probe-watchdog.h",
       "size": 1899,
       "sha256": "f852d97317be2c50cf1fd86306af69961301bdf50d67e1b966f360f0d4647dac"
+    },
+    {
+      "path": "compat/tests/resource-map-probe.cpp",
+      "size": 4482,
+      "sha256": "fdf55e24b3ffb212eed483fc427071ec9fcde11ff019e25ad6a47b4a26a05652"
+    },
+    {
+      "path": "compat/tests/resource127-probe.cpp",
+      "size": 17853,
+      "sha256": "3917985b8fa9d3fb21a719ff770d69a54db38bc88ccb79871fcd165539bdc124"
+    },
+    {
+      "path": "compat/tests/return-trace-test.cpp",
+      "size": 6972,
+      "sha256": "73620f8a070b9ecbade3ea52ca6441ac7d130e3896565455b614b1a085495cda"
     },
     {
       "path": "compat/tests/sandbox-probe.cpp",
@@ -468,6 +763,21 @@
       "sha256": "c717e927fed52474938839744430ea9476940ace8a97c30822664bd662a3b7ea"
     },
     {
+      "path": "compat/tests/surface-blit-probe.cpp",
+      "size": 11059,
+      "sha256": "c4c05cbd0a4cf88330eeacc89d98981d4d783f216049c5d01f1f3036cdfa24c3"
+    },
+    {
+      "path": "compat/tests/task-trace-posix.cpp",
+      "size": 4200,
+      "sha256": "a4c44f71d0aca2b020452a15a11326e30d337c3e05a65b90200a714f5dc11bf5"
+    },
+    {
+      "path": "compat/tests/task-trace-probe.cpp",
+      "size": 7598,
+      "sha256": "601ac2068ee90bc0cb5836b8b0c8f58abc62e3ddde01a91e3bbe098180bdf76a"
+    },
+    {
       "path": "compat/tests/test-native-shader-pack.py",
       "size": 12838,
       "sha256": "987eb50c52567154cbf3ecbbc31ba864e7ddccce9e4e7db2bfa36bef953f4a6a"
@@ -476,6 +786,11 @@
       "path": "compat/tests/test-xsx-shader.py",
       "size": 14208,
       "sha256": "299542fb6768c23c4fa9ca767dc1699bebb722be0d21148aa6c4eb52da06a528"
+    },
+    {
+      "path": "compat/tests/ui-shader-readback.cpp",
+      "size": 16777,
+      "sha256": "7ad5a03c34919a92a5fce16cfa7bc5b64c969f59c6a45726ded29974f65efb70"
     },
     {
       "path": "compat/tests/vtable-ids.cpp",
@@ -498,6 +813,11 @@
       "sha256": "faef9a082da06a248ad66fd5640d2ae69b98a5a4cc93b8e6999cde57733f8952"
     },
     {
+      "path": "compat/tests/xmem-neighbor-probe.cpp",
+      "size": 5882,
+      "sha256": "b09f8f39dae476a8af7eab07860f389e0541076e617627ee2811ebde575b4ead"
+    },
+    {
       "path": "compat/tests/xmem-test.cpp",
       "size": 1524,
       "sha256": "b7f516fccf8160bc57dc5c82cde7511383e7a9cd2053cfbe6643b55f5b88b0d7"
@@ -511,6 +831,11 @@
       "path": "compat/tests/xsx_descriptor_heap_proxy.h",
       "size": 4566,
       "sha256": "070f644798f26bc9d3452f2223dbefec34176940d59057e30784d02a8116d6ec"
+    },
+    {
+      "path": "compat/tests/xsx_gfx_translate.py",
+      "size": 18154,
+      "sha256": "c23c06fbc362778ab4581918e78b8e433c755d94fc352f25d44a353a82be41a5"
     },
     {
       "path": "compat/tests/xsx_resource_proxy.h",
@@ -541,6 +866,11 @@
       "path": "compat/tests/xsx_shader_translate.py",
       "size": 10115,
       "sha256": "2a124d3c5d23853d9491ad3a4965eab5690d292a8cb9fd0bbd8da0531e453eb5"
+    },
+    {
+      "path": "compat/tools/build-gfx-cache.py",
+      "size": 3434,
+      "sha256": "052dfd0069eaff0c2dee6ba1f40be96e1e303802f4af0d65e2ecfd5a75815f88"
     },
     {
       "path": "compat/tools/func-strings.py",
@@ -593,6 +923,11 @@
       "sha256": "4b4aee843abb790411d4245a87e75715a29bbae0f63deae4c08b207d1aea93e8"
     },
     {
+      "path": "compat/tools/summarize-return-trace.py",
+      "size": 4087,
+      "sha256": "82e581497acd6e42ed2d6cee15e07338077bd7792d77c173197a423757aaf0af"
+    },
+    {
       "path": "compat/tools/summarize-unmapped-slots.py",
       "size": 9244,
       "sha256": "a8bc8cea0c9d884bf8eed802728b29256543ae0f3ca61bb3f0a978c66aedeffe"
@@ -614,28 +949,243 @@
     },
     {
       "path": "docs/BUILDING.md",
-      "size": 8380,
-      "sha256": "e1419207fe5f877bc2690fd00542bad6d8d3cf23ede9b6b0cf63babd87f6586e"
+      "size": 12038,
+      "sha256": "06208ff6bcf44fcef30021bafec58bd0e96979d3449a4de2550ee340c77c8160"
+    },
+    {
+      "path": "docs/NATIVE_GRAPHICS.md",
+      "size": 4122,
+      "sha256": "b8156c6bb32cd3b833647038506cf7f01c19c55c414688cc75e2718990eea91b"
     },
     {
       "path": "docs/PUBLICATION.md",
-      "size": 4368,
-      "sha256": "6c0c418e86609693a80002ae81e4eeb04eb7f633903e56129717fcd1ae9fd60e"
+      "size": 4499,
+      "sha256": "0efe8d982e6b57745aaccabfc765d5bd7aae9627234626ef80a4ccff7ebcb337"
     },
     {
       "path": "docs/STATUS.md",
-      "size": 5531,
-      "sha256": "d89807a52530dc075d1d9859c1ca960e5f910fabe8c14c9a5aeb5838b8b7fcf3"
+      "size": 8464,
+      "sha256": "7a98e7d6c5a5cfbc119dc9a98145a10344543da0fda27cb6155912ff2cf4ee04"
     },
     {
       "path": "docs/VALIDATION.md",
-      "size": 2483,
-      "sha256": "738e2eb3b8a0188d9bd3e0d207c709972e903b2b32b1aa29d76257908b403fbf"
+      "size": 5290,
+      "sha256": "8a814333678b3f36c7c99bf7809dbbfe6d22d4b97ef3e504656d98c203bec768"
+    },
+    {
+      "path": "local-agent-work/README.md",
+      "size": 1691,
+      "sha256": "ea579e6484974a6995fee80968657ed041faf7407d103dbb143970273e205dbe"
+    },
+    {
+      "path": "local-agent-work/build-dll.sh",
+      "size": 361,
+      "sha256": "35bfe6e5e16720d719d5403138060b3f3af044be69348f521db6b8fb92aa36bd"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/bootstrap_noop_pso.h",
+      "size": 4631,
+      "sha256": "95d860fb75e38abb9398425a7786eef17a42cd170e0db4010b4f2ec899d9d37a"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/d3d12_xs.cpp",
+      "size": 192575,
+      "sha256": "42696f2a206d8308baab1b73524810a7f292c78f81d9c941032b985a0fb22ae8"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/d3d12_xs.def",
+      "size": 279,
+      "sha256": "75717e7330e8e669b23a300f4e4b14111db844fec17fddac7e729fc07ef9e979"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/d3d12_xs_fwd.inc",
+      "size": 26752,
+      "sha256": "aab427ae53fc5b47486d57feb54cde27b9075c114b42428c5fb326bcd9a0ebb7"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/fence_mirror.h",
+      "size": 3798,
+      "sha256": "465eb68c2f4ccb1bcba75b2577eed45baa8a3d7909a516357a81ffeb84140740"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/frame_clock.h",
+      "size": 4165,
+      "sha256": "2d50f2e694d3456cb65e706d2e93110171dd717ae11be94c4830e8a14f52987a"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/gfx_blend.h",
+      "size": 3595,
+      "sha256": "ebac9862bae445dbe2aafd348fedd57a6289ef3d213f517911e8303b15d9a200"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/gfx_buffer_descriptor.h",
+      "size": 1332,
+      "sha256": "2885ea62515c3553e92d3a0b89084d0dbab427022d0bf5fe7f03351fcb5e0496"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/gfx_input_layout.h",
+      "size": 1665,
+      "sha256": "59392375220a1e3ca888819b1d81310d2960b47de9c20a57c468d865c8abd703"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/gfx_native.h",
+      "size": 21321,
+      "sha256": "2225ff30f72d6bbffe17b3bb772e62a21bf69b64ecb7619d449d4eb7cc097483"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/gfx_native_draw.h",
+      "size": 36987,
+      "sha256": "3562a9b123a95951bc89a1d7e668cedf01d7c504eed6087939ad620b50f5ec4c"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/gfx_pso_description.h",
+      "size": 1562,
+      "sha256": "466c60f8bfbb82982ed7f95b288e9b935401acd1721e8dc5b7e63fdfde9750bf"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/gfx_snapshot.h",
+      "size": 5490,
+      "sha256": "5c7bbd2e4ebb819b8fe964130145eb07f338ba14e2f1b7b6c11b7eedd61061d0"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/gfx_view_trace.h",
+      "size": 4262,
+      "sha256": "e856aa85584c8d293e9dc286419f855f496cfdc67a9b91db6624b2a4f0b07302"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/guest_footprint.h",
+      "size": 1913,
+      "sha256": "4d1c741c062260b65082b8db9cb60b15c2ad53ca3676428cd243df2a23685e52"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/guest_shadow.h",
+      "size": 5596,
+      "sha256": "2a65609e63e6b4818f94d47fd198c6cfd7f4994581327cdd3c2c805869e4c44b"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/instruction_resume.h",
+      "size": 867,
+      "sha256": "65b77f6512c5e4e34ec91723002fe9c662a2427bc0f34665165e3c276bfd66fe"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/list_writes.h",
+      "size": 5612,
+      "sha256": "ce611a8b1dd709bfd20235cdebf0cdfffb51d9d1eedf29e4f5b1343c8ced57bd"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/native_pso_capture.h",
+      "size": 3457,
+      "sha256": "0691c60947dc778c882473f7b98cc7f5068eb1466e6266c1898809c96950adb5"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/persistent_trace.h",
+      "size": 6316,
+      "sha256": "ba56c897274bda2fe8f5780cf1d91875279ca6439916d5ea1e30f08319fb129d"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/profiler.h",
+      "size": 8361,
+      "sha256": "070b202ac09f709a1502c3c80c905a4fd077952bbf761c43af00e3762717b3ab"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/return_trace.h",
+      "size": 5652,
+      "sha256": "16ec46f0414692be9d91e32db30b36f48b8721c32f0448ca4f2cb78e7bc01c2d"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/surface_blit.h",
+      "size": 9987,
+      "sha256": "cbc81e5db2f0d8dbd8c02b34916d0a07c6afe6abf6c973ad4a2275b92a3d541e"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/writer_fault.h",
+      "size": 3214,
+      "sha256": "e80d83358354b174a98fe8eb5912c346a6df8968f24729f1e87e27b8e47f147b"
+    },
+    {
+      "path": "local-agent-work/src/d3d12_xs/writer_task_trace.h",
+      "size": 9477,
+      "sha256": "f2758403f04f0c11fe48266795f007fe7d29ed0e11323e828d232a995b15bd07"
+    },
+    {
+      "path": "native-gfx/EXPERIMENTS.md",
+      "size": 3029,
+      "sha256": "e2c1d84dbcd4a9bb171549bcdc790a2c01a7518b550614c1c76d8ba349d5e8e2"
+    },
+    {
+      "path": "native-gfx/README.md",
+      "size": 4237,
+      "sha256": "7aa865fa3df5c97e21b9f540491896c66ab6ab2027ed87ce9d66d40bc666ebf2"
+    },
+    {
+      "path": "native-gfx/build.sh",
+      "size": 930,
+      "sha256": "0b14be348a7ee28277a9a6e311dd44a7ff4f080be964010eb15e253693e8b973"
+    },
+    {
+      "path": "native-gfx/src/exp2_core.c",
+      "size": 13837,
+      "sha256": "35e6b128062f9e25378442de843fbf9cecced6b2b4ec5fadadb317938307bfb5"
+    },
+    {
+      "path": "native-gfx/src/gpu_unix.c",
+      "size": 3191,
+      "sha256": "020faac458c00eecfba2afc4ecc9a070aa5ac88dbd9d2a65786c1af4387c0ac4"
+    },
+    {
+      "path": "native-gfx/src/gpu_unix.h",
+      "size": 127,
+      "sha256": "1392728bd81d43a7e49b890524ee0e265c176f22f2199248e71ddfd929af37d3"
+    },
+    {
+      "path": "native-gfx/src/phys_probe.c",
+      "size": 3619,
+      "sha256": "71fd3e6a43f5a1e1076c135d8195fa5d7e6fa11a359eab3c5877c1ab7393117f"
+    },
+    {
+      "path": "native-gfx/src/phys_unix.c",
+      "size": 4377,
+      "sha256": "7c945a979eee5ed64e1c7596dd38da97a7593d3caad4a2e82155e4e83de2be7f"
+    },
+    {
+      "path": "native-gfx/src/phys_unix.h",
+      "size": 422,
+      "sha256": "66856b453a1929d0cad89878b8abbb73d4f530d08ae77691b71c1a00a5854ac6"
+    },
+    {
+      "path": "native-gfx/src/probe.c",
+      "size": 1239,
+      "sha256": "2d4d3d03dd0b564ab4c91eb5ca3118ae4fcbb301935c8240d66ca6949b98107d"
+    },
+    {
+      "path": "native-gfx/src/xsxgpu.c",
+      "size": 2135,
+      "sha256": "25ed03978c2a631ee53a20158933234c31b62b570cab4b7add25b19e022ee734"
+    },
+    {
+      "path": "native-gfx/src/xsxgpu.spec",
+      "size": 278,
+      "sha256": "ac1d0b454cb3c52778f839ce932357dbd5ba77242c6c46417de8a5cf540180bb"
+    },
+    {
+      "path": "native-gfx/src/xsxgpu_abi.h",
+      "size": 742,
+      "sha256": "3a11af70da69305148657949835f3de872548283ba4fd54d5f7810faf6dcac18"
+    },
+    {
+      "path": "native-gfx/src/xsxgpu_unix.c",
+      "size": 2669,
+      "sha256": "e23af2f414ebbf49dc01448367683cd7adc2e04f8f67385c7ca3dd9585ef94f8"
+    },
+    {
+      "path": "screenshots/player_select_first_screen.png",
+      "size": 25811,
+      "sha256": "82f06fbb9e8096326450a4c3a565adf86db5c88738b586abdd89da213e72f803"
     },
     {
       "path": "source-provenance.json",
-      "size": 36872,
-      "sha256": "90023a90931a7ad6a105f1ad98a134d57bb241857e06a9ce2def84eeb83020db"
+      "size": 65953,
+      "sha256": "7b84a9d067d8b8d336305ed4f53c62eb1e6050a9d467a0e1689ea2fce9a3ddf3"
     },
     {
       "path": "tests/00-hello/Main.cpp",
@@ -709,8 +1259,13 @@
     },
     {
       "path": "tools/audit-public-tree.py",
-      "size": 6509,
-      "sha256": "09c2a5c835daf8f12b086faba9cadf7e8343e3a4964b3776847c31f7fd3071f7"
+      "size": 7665,
+      "sha256": "f73efb208e0d59d3752c14fde3a9d72d1e3a680921b79e3c954f692733687b41"
+    },
+    {
+      "path": "tools/sync-from-workspace.py",
+      "size": 8418,
+      "sha256": "ab5e6a19ff08467b1d3a49068505ff9bb087aaeb636a281fdd50d817c445f809"
     }
   ]
 }

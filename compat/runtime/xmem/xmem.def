@@ -13,3 +13,4 @@ EXPORTS
     XMemTransferMemory
     XMemVirtualAlloc
     XMemVirtualQuery
+    XsxPhysWrite

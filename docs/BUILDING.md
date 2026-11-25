@@ -45,8 +45,8 @@ The storage build compiles the bundled miniz C source with `x86_64-w64-mingw32-g
 Generated DLLs go under `compat/build/`; the graphics script also copies its DLL
 into `tests/03-fidelityfx/`. Both the outputs and deployment are local.
 
-XG and GameInput currently have source/export definitions but no dedicated build
-scripts. They can be built using the same compiler:
+GameInput has its own builder: `bash compat/build-gameinput.sh`. XG currently
+has source/export definitions without a dedicated build script. They can be built using the same compiler:
 
 ```bash
 mkdir -p compat/build/sys
@@ -189,3 +189,56 @@ The public tree distinguishes source compilation, historical host/GPU results,
 synthetic bootstrap behavior, and observed game progress. Use
 [STATUS.md](STATUS.md) for those boundaries. Shader/PSO captures, debug dumps,
 game data, and prefixes generated during these workflows stay local.
+
+
+## November26 additions: three graphics builds
+
+The main adapter, VKD3D graphics fork and direct AMDGPU branch remain separate:
+
+```bash
+bash compat/build-d3d12_xs.sh
+bash local-agent-work/build-dll.sh
+bash native-gfx/build.sh
+bash compat/build-gameinput.sh
+```
+
+The fork builder creates `local-agent-work/build/`. Native graphics builds Unix `.so`, builtin PE and two probes under `native-gfx/build/`; dependencies are Wine development tools/headers and libdrm_amdgpu/libdrm in addition to GCC and MinGW. It does not supply shader inputs or initialize a Wine prefix. See [NATIVE_GRAPHICS.md](NATIVE_GRAPHICS.md).
+
+Additional portable checks without game/SDK fixtures:
+
+```bash
+mkdir -p compat/build/host
+c++ -std=c++17 -O2 -pthread compat/tests/frame-clock-test.cpp -o compat/build/host/frame-clock
+compat/build/host/frame-clock
+c++ -std=c++17 -O2 -pthread compat/tests/return-trace-test.cpp -o compat/build/host/return-trace
+compat/build/host/return-trace
+c++ -std=c++17 -O2 compat/tests/guest-footprint-test.cpp -o compat/build/host/footprint
+compat/build/host/footprint
+c++ -std=c++17 -O2 compat/tests/gfx-buffer-descriptor-cpu.cpp -o compat/build/host/buffer-descriptor
+compat/build/host/buffer-descriptor
+bash compat/run-task-trace-cpu.sh
+```
+
+`gfx-input-layout-cpu.cpp` and `gfx-pso-description-cpu.cpp` require private captured fixtures; their source is included, the fixtures are not. The historical Linux physical-view model predates the optional native BO hook and may need its mock declarations updated for the new header. The new Windows neighbor probe and direct BO probe are separate tests.
+
+Additional probe builders cover frame events, resource127/title fallback, buffer127, SurfaceBlit, audio output, UI readback and the selected-program bridge. Builders that copy local PC DLLs or synthesize captured fixture headers require those private dependencies first; their absence in this export is intentional. Build UI readback before the bridge so the frozen `tests/16-ui-shaders` program manifest exists.
+
+For the prepared main game sandbox, retain the working null endpoint prerequisite:
+
+```bash
+compat/sandbox/run-game.sh 90 XSX_SB_AUDIO=null XSX_DEV_NOOP_PSO=1 XSX_TRACE_RETURNS=1
+```
+
+`XSX_SB_AUDIO=null` exposes the authored ALSA null-playback config without host audio sockets/capture. It discards sound while supporting the tested WASAPI/spatial initialization. It does not implement the game's DSP/codec work.
+
+The fork runner uses `XSX_DEV_NATIVE_GFX=1`, the private translated cache and `tests/17-native-ui-bridge` candidate. This differs from direct AMDGPU flags `XSX_SB_NATIVE_GFX=1` (sandbox bind) and `XSX_NATIVE_GFX=1` (XMem BO hook). Those native hooks are opt-in. Newer game logs show native XMem activation and successful physical-destination storage; dedicated M2/readback coverage is still pending.
+
+Original FFX regression, with local headers/libraries and PC graphics dependencies:
+
+```bash
+XSX_GRAPHICS=1 WINEDEBUG=-all ./compat/run-test.sh tests/03-fidelityfx/ffx-context.exe --xbox 3 --heap-abi
+```
+
+The historical failure remains native PSO (`0x8000000D`, process8). A failure before test entry is an environment failure, not a new FFX result. The selected translation bridge probe uses `XSX_DEV_GFX_REFRESH=0` to retain its draw-time snapshot contract; the game uses submit-time refresh by default. Do not compare those as equivalent coherence tests.
+
+The fork also carries `XSX_NO_WATCHDOG=1` as an opt-in debugging flag. It changes a game flag to bypass the watchdog; leave it unset for ordinary stability evidence. Source synchronization does not enable it.

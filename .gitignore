@@ -100,3 +100,34 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Isolated graphics branches and direct-ISA experiment outputs
+/local-agent-work/build/
+/local-agent-work/data/
+/local-agent-work/analysis/
+/local-agent-work/shader-cache/
+/native-gfx/build/
+/native-gfx/data/
+/compat/tests/native-isa/isa/
+/compat/tests/native-isa/raw-dispatch
+/compat/tests/native-isa/raw-draw
+/compat/tests/native-isa/raw-tex
+/compat/tests/native-isa/bo-fixed
+/compat/tests/native-isa/userptr-shared
+/tests/09-return-trace/
+/tests/10-frame-events/
+/tests/11-resource127/
+/tests/12-present-blit/
+/tests/13-buffer127/
+/tests/14-writer-task/
+/tests/15-audio-output/
+/tests/16-ui-shaders/
+/tests/17-native-ui-bridge/
+/tests/18-xmem-neighbor/
+*.bind
+*.isa
+*.ppm
+*.spv
+
+# Reviewed screenshot of the first visible account-selection UI
+!/screenshots/player_select_first_screen.png

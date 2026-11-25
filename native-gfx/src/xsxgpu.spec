@@ -1,0 +1,7 @@
+@ stdcall xsxgpu_open(ptr ptr ptr)
+@ stdcall xsxgpu_exp2(ptr int64)
+@ stdcall xsxgpu_phys_map(ptr int64 ptr int64)
+@ stdcall xsxgpu_phys_unmap(ptr int64)
+@ stdcall xsxgpu_gpu_fill(ptr long)
+@ stdcall xsxgpu_phys_stats(ptr ptr)
+@ stdcall xsxgpu_phys_write(int64 int64 ptr int64)

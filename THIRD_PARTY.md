@@ -46,3 +46,6 @@ referenced executables, SDK implementations, archive contents, or certificates.
 No project-wide license has been selected in this snapshot. No license grant for
 external components is implied. Their own notices and licenses apply when those
 components are obtained separately.
+
+
+The direct native branch additionally uses the host libdrm/libdrm_amdgpu API and Wine unixlib development interface; their distributions are not bundled. PM4/register research references the AMD/Mesa ecosystem. The supplied `store.s`, `fetch.s` and short compute helper are authored experimental programs; original game ISA, FSSM data and translated program caches remain excluded. Direct execution has only been recorded on the selected Navi21/gfx1030 host.

@@ -10,12 +10,16 @@ import sys
 
 
 MANIFEST = 'PUBLIC_SOURCE_MANIFEST.json'
+MANIFEST_SCOPE = 'Authored UTF-8 source and explicitly reviewed screenshot; excludes .git'
+# The one existing visual evidence artifact was inspected; replacements require review.
+REVIEWED_ASSETS = {'screenshots/player_select_first_screen.png':
+                   '82f06fbb9e8096326450a4c3a565adf86db5c88738b586abdd89da213e72f803'}
 ROOT_FILES = {'.gitignore', '.gitattributes', 'README.md', 'THIRD_PARTY.md',
               'source-provenance.json', MANIFEST}
-SOURCE_SUFFIXES = {'.c', '.cpp', '.h', '.inc', '.def', '.py', '.sh', '.hlsl', '.xml', '.Config'}
+SOURCE_SUFFIXES = {'.c', '.cpp', '.h', '.inc', '.def', '.py', '.sh', '.hlsl', '.xml', '.Config', '.s', '.spec', '.conf'}
 BLOCKED_PARTS = {'sdk', 'PGDK-extracted', 'game_dlls', 'sandbox', 'drive_c',
                  'dosdevices', '.aws', '.codex', '.agents', '__pycache__',
-                 'node_modules', 'build', 'logs'}
+                 'node_modules', 'build', 'logs', 'data', 'isa', 'shader-cache', 'analysis'}
 BLOCKED_SUFFIXES = {'.exe', '.dll', '.rpf', '.xvd', '.xvc', '.xsp', '.dxbc', '.dxil',
                     '.fxcp', '.fssm', '.bin', '.blob', '.src', '.dst', '.dmp', '.log',
                     '.reg', '.pem', '.key', '.pfx', '.p12', '.zip', '.7z', '.rar',
@@ -35,12 +39,17 @@ PATTERNS = {
 
 
 def allowed(path):
+    if path in {'native-gfx/build.sh', 'native-gfx/README.md', 'native-gfx/EXPERIMENTS.md',
+                'local-agent-work/build-dll.sh', 'local-agent-work/README.md'}:
+        return True
+    if path in REVIEWED_ASSETS:
+        return True
     if path in ROOT_FILES:
         return True
     p = Path(path)
     if path.startswith('docs/'):
         return p.suffix == '.md'
-    if path == 'tools/audit-public-tree.py':
+    if path in {'tools/audit-public-tree.py', 'tools/sync-from-workspace.py'}:
         return True
     if path in {'compat/runtime/xcrdapi/third_party/miniz/LICENSE',
                 'compat/runtime/xcrdapi/third_party/miniz/README.txt'}:
@@ -54,7 +63,7 @@ def allowed(path):
     if p.name in {'gamedata.path', 'MicrosoftGame.Config', 'game-imports.generated.h',
                   'native-vs-data.h', 'native-cs-data.h', 'target-profile.json'}:
         return False
-    return (path.startswith(('compat/', 'tests/')) and
+    return (path.startswith(('compat/', 'tests/', 'native-gfx/src/', 'local-agent-work/src/d3d12_xs/')) and
             (p.suffix in SOURCE_SUFFIXES or p.name in {'README.md', 'scope.txt'}))
 
 
@@ -80,6 +89,13 @@ def inspect(root):
                 problems.append((rel, 'file is outside the publication selection'))
                 continue
             data = p.read_bytes()
+            if rel in REVIEWED_ASSETS:
+                digest = hashlib.sha256(data).hexdigest()
+                if digest != REVIEWED_ASSETS[rel] or not data.startswith(b'\x89PNG\r\n\x1a\n'):
+                    problems.append((rel, 'reviewed asset changed; inspect before updating its pinned hash'))
+                else:
+                    files.append({'path': rel, 'size': len(data), 'sha256': digest})
+                continue
             if data.startswith((b'MZ', b'\x7fELF')) or b'\0' in data:
                 problems.append((rel, 'binary signature or NUL byte'))
                 continue
@@ -112,7 +128,7 @@ def main():
         return 1
     target = root / MANIFEST
     if args.write_manifest:
-        target.write_text(json.dumps({'schema': 1, 'scope': 'UTF-8 source-only publication; excludes .git',
+        target.write_text(json.dumps({'schema': 1, 'scope': MANIFEST_SCOPE,
                                       'files': files}, indent=2) + '\n')
     else:
         try:
@@ -130,7 +146,7 @@ def main():
         except (OSError, ValueError, KeyError, TypeError):
             print('[FAIL] Missing or invalid publication manifest', file=sys.stderr)
             return 1
-    print(f'[PASS] {len(files)} inventoried text files; {sum(f["size"] for f in files)} bytes; no selection/scan findings')
+    print(f'[PASS] {len(files)} inventoried files (source and reviewed assets); {sum(f["size"] for f in files)} bytes; no selection/scan findings')
     print('[PASS] manifest ' + ('written' if args.write_manifest else 'verified'))
     return 0
 

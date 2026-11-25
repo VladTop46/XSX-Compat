@@ -9,6 +9,7 @@
 #   - переменные окружения хоста сброшены (--clearenv);
 #   - в Wine-префиксе остаются только диски C: (prefix) и G: (game); Z:/E:/D: удалены.
 # Явно ВИДНО игре: содержимое хостового /usr (read-only), версия GPU/железа через /sys и каталог загрузки игры (read-only, /gamedata).
+# Опционально (XSX_SB_NATIVE_GFX=1): native-gfx/build и native-gfx/data репозитория (read-only).
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 SB="$ROOT/sandbox"
@@ -49,8 +50,26 @@ bw() {
     args+=(--bind "$XDG_RUNTIME_DIR/${WAYLAND_DISPLAY:-wayland-1}" "/run/user/$UIDN/${WAYLAND_DISPLAY:-wayland-1}"
            --setenv WAYLAND_DISPLAY "${WAYLAND_DISPLAY:-wayland-1}")
   fi
+  # Optional silent playback: a real ALSA null PCM, with no capture route.
+  # Only a project-owned config is exposed; no host audio socket/device.
+  case "${XSX_SB_AUDIO:-off}" in
+    off) ;;
+    null)
+      args+=(--ro-bind "$ROOT/compat/sandbox/audio-null.conf" /etc/xsx-audio-null.conf
+             --setenv ALSA_CONFIG_PATH /etc/xsx-audio-null.conf)
+      ;;
+    *) echo "XSX_SB_AUDIO must be off or null" >&2; exit 2 ;;
+  esac
+  # Ветка native-gfx: наши собственные сборки (xsxgpu builtin PE + unixlib .so) и данные экспериментов,
+  # ТОЛЬКО ЧТЕНИЕ. Хостовые пути вне репозитория не открываются; сеть/X11 без изменений.
+  if [[ "${XSX_SB_NATIVE_GFX:-0}" == 1 ]]; then
+    args+=(--ro-bind "$ROOT/native-gfx/build" /native-gfx/build --ro-bind "$ROOT/native-gfx/data" /native-gfx/data
+           --setenv WINEDLLPATH /native-gfx/build --setenv XSXGPU_DATA /native-gfx/data)
+    # Wine ищет builtin-DLL только для файлов из system32: кладём заглушку в префикс песочницы.
+    cp -f "$ROOT/native-gfx/build/x86_64-windows/xsxgpu.dll" "$SB/prefix/drive_c/windows/system32/xsxgpu.dll"
+  fi
   # Передача выбранных XSX_* переменных (только они).
-  for v in $(compgen -e | grep '^XSX_FFX_\|^XSX_VM_\|^XSX_GRAPHICS$\|^XSX_DEV_\|^XSX_DEVICE_\|^XSX_TRAP$\|^XSX_XGR_\|^XSX_DS_\|^XSX_XMEM_\|^XSX_THREAD_'); do args+=(--setenv "$v" "${!v}"); done
+  for v in $(compgen -e | grep '^XSX_FFX_\|^XSX_NATIVE_\|^XSX_PAD\|^XSX_PROF\|^XSX_XUSER\|^XSX_WINDOW\|^XSX_VM_\|^XSX_GRAPHICS$\|^XSX_DEV_\|^XSX_DEVICE_\|^XSX_TRAP$\|^XSX_XGR_\|^XSX_DS_\|^XSX_XMEM_\|^XSX_THREAD_\|^XSX_NO_\|^XSX_PRESENT_\|^XSX_FREE_\|^XSX_TRACE_\|^XSX_TASK_TRACE$\|^XSX_ROOT_\|^XSX_DRAW_\|^XSX_SHADOW$\|^XSX_PSO_'); do args+=(--setenv "$v" "${!v}"); done
   exec bwrap "${args[@]}" "$@"
 }
 

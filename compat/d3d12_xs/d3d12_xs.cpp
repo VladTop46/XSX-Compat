@@ -1,5 +1,13 @@
 #include <vector>
 #include <map>
+#include <set>
+#include <string>
+#include <array>
+#include <chrono>
+#include <thread>
+#include "frame_clock.h"
+#include "guest_footprint.h"
+#include "surface_blit.h"
 // d3d12_xs.dll — прототип слоя совместимости Xbox Series D3D12 -> PC D3D12 (VKD3D-Proton).
 // Экспорты соответствуют импортам game_scarlett_master.exe и Xbox FidelityFX DLL.
 // Сигнатуры D3D12XboxCreateDevice/D3D12ConfigureVirtualMemoryX восстановлены по
@@ -30,16 +38,83 @@ static void CallerStr(void* ret, char* out, size_t n)
 }
 #define CALLER(buf) char buf[300]; CallerStr(__builtin_return_address(0), buf, sizeof buf)
 
+#include "return_trace.h"
+static int ReturnTraceMode()
+{
+    static const int mode = [] {
+        char value[8]{};
+        GetEnvironmentVariableA("XSX_TRACE_RETURNS", value, sizeof value);
+        return value[0] == '2' ? 2 : value[0] == '1' ? 1 : 0;
+    }();
+    return mode;
+}
+static uint32_t ReturnTraceGetError() { return GetLastError(); }
+static void ReturnTraceSetError(uint32_t error) { SetLastError(error); }
+static bool ReturnTraceReadWord(uintptr_t address, uintptr_t& value)
+{
+    SIZE_T read = 0;
+    return ReadProcessMemory(GetCurrentProcess(), (const void*)address, &value, sizeof value, &read) && read == sizeof value;
+}
+static void ReturnTraceEmit(const xsx::returns::Event& event)
+{
+    static const char* names[] = { "export", "device", "queue", "list", "heap", "pso", "allocator", "fence", "resource" };
+    char caller[300]; CallerStr((void*)event.caller, caller, sizeof caller);
+    // One stdio operation keeps this record together across game threads.
+    std::fprintf(stderr, "[D3D12_XS] RET %s call=%llu end=%llu failure=%llu tick=%llu tid=%lu %s slot=%d method=%s object=%p hr=0x%08lx value=%p out=%p output=%p readable=%u caller=%s\n",
+        xsx::returns::FindingName(event.finding), (unsigned long long)event.call, (unsigned long long)event.returned,
+        (unsigned long long)event.failure, (unsigned long long)GetTickCount64(), GetCurrentThreadId(),
+        names[event.site.kind], event.site.slot, event.site.method, (void*)event.object,
+        (unsigned long)(uint32_t)event.value, (void*)event.value, (void*)event.output,
+        (void*)event.output_value, event.output_readable, caller);
+    std::fflush(stderr);
+}
+static void ConfigureReturnTrace()
+{
+    static const bool initialized = [] {
+        xsx::returns::hooks = {ReturnTraceMode, ReturnTraceGetError, ReturnTraceSetError, ReturnTraceReadWord, ReturnTraceEmit};
+        return true;
+    }();
+    (void)initialized;
+}
+static void ReturnTraceSnapshot()
+{
+    if (!ReturnTraceMode()) return;
+    std::fprintf(stderr, "[D3D12_XS] RET SNAPSHOT methods=%llu started=%llu returned=%llu failures=%llu (typed guest-facing D3D12 returns; unresolved/void contracts excluded)\n",
+        (unsigned long long)xsx::returns::installed.load(), (unsigned long long)xsx::returns::calls.load(),
+        (unsigned long long)xsx::returns::returned.load(), (unsigned long long)xsx::returns::failures.load());
+}
+
 // First-chance logging only: the game's own crash handler sometimes emits an
 // empty .dmp. Never handle/skip the fault or alter the supplied CONTEXT.
+extern "C" { extern uintptr_t g_arena_lo, g_arena_hi; }
+struct ExclusiveSrwLock {
+    SRWLOCK* lock;
+    explicit ExclusiveSrwLock(SRWLOCK& value) : lock(&value) { AcquireSRWLockExclusive(lock); }
+    ~ExclusiveSrwLock() { ReleaseSRWLockExclusive(lock); }
+    ExclusiveSrwLock(const ExclusiveSrwLock&) = delete;
+    ExclusiveSrwLock& operator=(const ExclusiveSrwLock&) = delete;
+};
+struct SharedSrwLock { SRWLOCK* l; explicit SharedSrwLock(SRWLOCK& s) : l(&s) { AcquireSRWLockShared(l); } ~SharedSrwLock() { ReleaseSRWLockShared(l); } };
+static std::map<uintptr_t, std::pair<DWORD, uintptr_t>> g_freed; static SRWLOCK g_freedLock = SRWLOCK_INIT; static uintptr_t g_freeFn = 0;
 static void DumpAllThreads();
+static void FrameClockSnapshot();
+#include "writer_task_trace.h"
+#include "writer_fault.h"
 static LONG CALLBACK TraceGraphicsFault(EXCEPTION_POINTERS* exception)
 {
     const DWORD code = exception->ExceptionRecord->ExceptionCode;
-    if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_IN_PAGE_ERROR && code != EXCEPTION_BREAKPOINT)
+    // Our observer handles these injected instructions later in the VEH chain.
+    // They must not consume the fatal-breakpoint budget or trigger crash dumps.
+    if (IsWriterTaskBreakpoint(exception)) return EXCEPTION_CONTINUE_SEARCH;
+    if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_IN_PAGE_ERROR && code != EXCEPTION_BREAKPOINT) {
+        if (code == 0x40010006 || code == 0x4001000A || code == 0x406D1388 || code == EXCEPTION_SINGLE_STEP || code == 0x80000004) return EXCEPTION_CONTINUE_SEARCH;
+        static volatile LONG other = 0; if (InterlockedIncrement(&other) <= 20) { char where[300]; CallerStr(exception->ExceptionRecord->ExceptionAddress, where, sizeof where); XS_LOG("OTHER-EXCEPTION code=0x%08lX thread=%lu at=%s", (unsigned long)code, GetCurrentThreadId(), where); }
         return EXCEPTION_CONTINUE_SEARCH;
+    }
     static volatile LONG active = 0, count = 0, breakpoints = 0;
     if (InterlockedCompareExchange(&active, 1, 0)) return EXCEPTION_CONTINUE_SEARCH;
+    if (code != EXCEPTION_BREAKPOINT && exception->ExceptionRecord->NumberParameters > 1 && exception->ExceptionRecord->ExceptionInformation[1] == ~(ULONG_PTR)0) {   // фоновые AV по адресу -1 только из kernel32+0x20cad не считаем
+        char w[200]; CallerStr(exception->ExceptionRecord->ExceptionAddress, w, sizeof w); if (!strcmp(w, "kernel32.dll+0x20cad")) { InterlockedExchange(&active, 0); return EXCEPTION_CONTINUE_SEARCH; } }
     if (InterlockedIncrement(code == EXCEPTION_BREAKPOINT ? &breakpoints : &count) <= 8) {
         const CONTEXT& r = *exception->ContextRecord;
         char where[300]; CallerStr((void*)r.Rip, where, sizeof where);
@@ -47,6 +122,9 @@ static LONG CALLBACK TraceGraphicsFault(EXCEPTION_POINTERS* exception)
             GetCurrentThreadId(), where, exception->ExceptionRecord->NumberParameters ?
             (unsigned long long)exception->ExceptionRecord->ExceptionInformation[0] : 0,
             exception->ExceptionRecord->NumberParameters > 1 ? (void*)exception->ExceptionRecord->ExceptionInformation[1] : nullptr);
+        ReturnTraceSnapshot();
+        FrameClockSnapshot();
+        if (code == EXCEPTION_BREAKPOINT) DumpWriterFault(r);
         XS_LOG("FAULT REG rip=%p rsp=%p rbp=%p rax=%p rbx=%p rcx=%p rdx=%p", (void*)r.Rip,
             (void*)r.Rsp, (void*)r.Rbp, (void*)r.Rax, (void*)r.Rbx, (void*)r.Rcx, (void*)r.Rdx);
         XS_LOG("FAULT REG rsi=%p rdi=%p r8=%p r9=%p r10=%p r11=%p r12=%p r13=%p r14=%p r15=%p",
@@ -56,6 +134,10 @@ static LONG CALLBACK TraceGraphicsFault(EXCEPTION_POINTERS* exception)
             uintptr_t b0 = (uintptr_t)GetModuleHandleA(nullptr); uint64_t g[24] = {}; ReadProcessMemory(GetCurrentProcess(), (void*)(b0 + 0x75d5980), g, sizeof g, nullptr);
             for (int i = 0; i < 24; i++) XS_LOG("GLOBAL exe+%#x = %p", 0x75d5980 + i * 8, (void*)g[i]);
         }
+        if (code == EXCEPTION_BREAKPOINT && (uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0x187fb) {
+            uintptr_t b0 = (uintptr_t)GetModuleHandleA(nullptr); uint64_t hdr[2] = {}; ReadProcessMemory(GetCurrentProcess(), (void*)(r.R14 - 0x10), hdr, 16, nullptr);
+            XS_LOG("BADFREE@187fb ptr=%p hdr=%016llx %016llx tid=%lu", (void*)r.R14, (unsigned long long)hdr[0], (unsigned long long)hdr[1], GetCurrentThreadId());
+            { SharedSrwLock gg(g_freedLock); auto it = g_freed.find(r.R14); if (it != g_freed.end()) XS_LOG("BADFREE@187fb ПРЕДЫДУЩИЙ вызов FreeChecked с этим ptr: tid=%lu ret=exe+%#llx", it->second.first, (unsigned long long)(it->second.second - b0)); else XS_LOG("BADFREE@187fb: этот ptr раньше в FreeChecked не приходил"); } }
         if (code == EXCEPTION_BREAKPOINT) { static volatile LONG once = 0; char v[4]; if (GetEnvironmentVariableA("XSX_THREAD_DUMP", v, sizeof v) && !InterlockedExchange(&once, 1)) DumpAllThreads(); }
         if (code == EXCEPTION_BREAKPOINT && (uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0x55aa5eb) {
             unsigned char b[256] = {}; SIZE_T u = 0; ReadProcessMemory(GetCurrentProcess(), (void*)(r.Rcx - 0x40), b, sizeof b, &u);
@@ -78,6 +160,11 @@ static LONG CALLBACK TraceGraphicsFault(EXCEPTION_POINTERS* exception)
             const void* q = w == 0 ? (void*)r.R14 : w == 1 ? (void*)r.Rsi : (void*)r.Rdi; unsigned char b[64] = {}; SIZE_T u = 0;
             if (ReadProcessMemory(GetCurrentProcess(), q, b, sizeof b, &u) && u) { char h[200] = {}; for (int i = 0; i < 40 && i < (int)u; i++) sprintf(h + i * 3, "%02x ", b[i]); XS_LOG("BP DUMP %s=%p: %s", w == 0 ? "r14" : w == 1 ? "rsi" : "rdi", q, h); }
         }
+        { const uintptr_t regs[] = { r.Rcx, r.Rdx, r.Rbx, r.Rsi, r.Rdi, r.R14, r.R15 }; const char* nm[] = { "rcx", "rdx", "rbx", "rsi", "rdi", "r14", "r15" };
+          for (int q = 0; q < 7; q++) { uintptr_t v = regs[q]; if (v < 0x10000 || IsBadReadPtr((void*)v, 64)) continue; bool arena = v >= g_arena_lo && v < g_arena_hi; const uint64_t* w = (const uint64_t*)v;
+            XS_LOG("FAULT OBJ %s=%p%s: %016llx %016llx %016llx %016llx %016llx %016llx", nm[q], (void*)v, arena ? " [ARENA kind=" : "", (unsigned long long)w[0], (unsigned long long)w[1], (unsigned long long)w[2], (unsigned long long)w[3], (unsigned long long)w[4], (unsigned long long)w[5]); } }
+        { uintptr_t b0 = (uintptr_t)GetModuleHandleA(nullptr); int shown = 0; for (unsigned i = 0; i < 1024 && shown < 40; ++i) { uintptr_t v = 0; SIZE_T u = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(), (void*)(r.Rsp + i * 8), &v, 8, &u) || u != 8) break; if (v > b0 + 0x1000 && v < b0 + 0x8000000) { XS_LOG("DEEPSTACK +%#x exe+%#llx", i * 8, (unsigned long long)(v - b0)); shown++; } } }
         for (unsigned i = 0; i < 24; ++i) {
             uintptr_t value = 0; SIZE_T used = 0;
             if (ReadProcessMemory(GetCurrentProcess(), (void*)(r.Rsp + i * 8), &value, sizeof value, &used) && used == sizeof value) {
@@ -97,7 +184,7 @@ struct RetTrap { uintptr_t ret; unsigned char orig; uintptr_t out; char what[96]
 static RetTrap g_ret[64]; static volatile LONG g_nRet = 0;
 static void FmtGuid(uintptr_t p, char* o, size_t n) { GUID g{}; if (!p || !ReadProcessMemory(GetCurrentProcess(), (void*)p, &g, sizeof g, nullptr)) { snprintf(o, n, "%p", (void*)p); return; }
     snprintf(o, n, "%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X", (unsigned long)g.Data1, g.Data2, g.Data3, g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3], g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]); }
-static uintptr_t g_watchTable = 0; static TrapEnt g_traps[16]; static int g_nTraps = 0; static uintptr_t g_rearm = 0; static volatile LONG g_trapN = 0;
+static uintptr_t g_watchTable = 0; static TrapEnt g_traps[16]; static int g_nTraps = 0; static thread_local uintptr_t g_rearm = 0; static volatile LONG g_trapN = 0;
 static void PeekStr(const char* tag, uintptr_t p)
 {
     unsigned char b[48] = {}; SIZE_T u = 0; if (p < 0x10000 || !ReadProcessMemory(GetCurrentProcess(), (void*)p, b, 47, &u) || !u) return;
@@ -139,6 +226,15 @@ static void DumpAllThreads()
     for (HANDLE h : susp) { ResumeThread(h); CloseHandle(h); }
     for (auto& r : recs) { char who[200]; CallerStr((void*)r.rip, who, sizeof who); XS_LOG("THREAD %lu rip=%s", r.tid, who); for (auto& f : r.frames) XS_LOG("THREAD %lu   stk+%#x exe+%#llx", r.tid, f.first, (unsigned long long)f.second); }
 }
+
+// ---- Диагностика двойного освобождения в аллокаторе игры «Global» (объект в exe+0xabcc310; метод Free = vtable+0x60 по коду 0x14455aeb0) ----
+// XSX_FREE_TRACE=1: поток ждёт появления объекта, ставит трап на Free; на каждом вызове запоминает (адрес → поток, вызывающий); повторное освобождение того же адреса
+// без промежуточного выделения (выделение не отслеживаем — возможны ложные срабатывания при реюзе адреса) печатается как DOUBLEFREE с обоими вызывающими.
+static void OnFreeTrap(CONTEXT& r)
+{
+    uintptr_t ra = 0; ReadProcessMemory(GetCurrentProcess(), (void*)r.Rsp, &ra, 8, nullptr); uintptr_t p = r.Rdx; if (!p) return;
+    ExclusiveSrwLock g(g_freedLock); g_freed[p] = { GetCurrentThreadId(), ra };
+}
 static LONG CALLBACK TrapHandler(EXCEPTION_POINTERS* e)
 {
     CONTEXT& r = *e->ContextRecord; const DWORD c = e->ExceptionRecord->ExceptionCode;
@@ -162,6 +258,8 @@ static LONG CALLBACK TrapHandler(EXCEPTION_POINTERS* e)
         XS_LOG("TRAP RET %s -> hr=0x%08lX *out=%p", g_ret[j].what, (unsigned long)(uint32_t)r.Rax, (void*)v);
         DWORD o; void* a = (void*)g_ret[j].ret; VirtualProtect(a, 1, PAGE_EXECUTE_READWRITE, &o); *(unsigned char*)a = g_ret[j].orig; VirtualProtect(a, 1, o, &o); g_ret[j].ret = 0; return EXCEPTION_CONTINUE_EXECUTION;
     }
+    if (g_freeFn && (uintptr_t)r.Rip == g_freeFn) { OnFreeTrap(r);
+        for (int i = 0; i < g_nTraps; i++) if (g_traps[i].addr == g_freeFn) { DWORD o; void* a = (void*)g_freeFn; VirtualProtect(a, 1, PAGE_EXECUTE_READWRITE, &o); *(unsigned char*)a = g_traps[i].orig; VirtualProtect(a, 1, o, &o); g_rearm = g_freeFn; r.EFlags |= 0x100; return EXCEPTION_CONTINUE_EXECUTION; } }
     for (int i = 0; i < g_nTraps; i++) if (g_traps[i].addr == (uintptr_t)r.Rip) {
         LONG n = InterlockedIncrement(&g_trapN);
         if (n <= 400) {
@@ -202,6 +300,18 @@ static LONG CALLBACK TrapHandler(EXCEPTION_POINTERS* e)
                 char a1[160], a2[160]; CallerStr((void*)vt, a1, sizeof a1); CallerStr((void*)fn, a2, sizeof a2);
                 uint64_t st[4] = {}; ReadProcessMemory(GetCurrentProcess(), (void*)(r.Rsp + 0x20), st, sizeof st, nullptr);
                 static std::atomic<int> k{0}; if (k++ < 4000) XS_LOG("BLOCKREAD obj=%p vt=%s fn=%s edx=%#llx file=%p off=%#llx a5=%#llx a6=%p a7=%p comp=%#llx", (void*)r.Rcx, a1, a2, (unsigned long long)r.Rdx, (void*)r.R8, (unsigned long long)r.R9, (unsigned long long)st[0], (void*)st[1], (void*)st[2], (unsigned long long)(st[3] & 0xff));
+            }
+            if ((uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0x4dcbc40) {
+                uint32_t f[8] = {}; uintptr_t data = 0; ReadProcessMemory(GetCurrentProcess(), (void*)(r.Rcx), f, sizeof f, nullptr); ReadProcessMemory(GetCurrentProcess(), (void*)(r.Rcx + 8), &data, 8, nullptr);
+                uintptr_t ra = 0; ReadProcessMemory(GetCurrentProcess(), (void*)r.Rsp, &ra, 8, nullptr);
+                static std::atomic<int> nl{0}; if (f[4] - f[6] < 0x2000 || nl++ < 5) XS_LOG("LINBUF tid=%lu obj=%p data=%p cap=%#x used=%#x req=%#x ret=exe+%#llx", GetCurrentThreadId(), (void*)r.Rcx, (void*)data, f[4], f[6], (unsigned)r.R8, (unsigned long long)(ra - (uintptr_t)GetModuleHandleA(nullptr)));
+            }
+            if ((uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0x4e52a40) {   // flush локального буфера задачи в общий поток
+                uint32_t used = 0; uintptr_t data = 0; ReadProcessMemory(GetCurrentProcess(), (void*)(r.Rcx + 0x18), &used, 4, nullptr); ReadProcessMemory(GetCurrentProcess(), (void*)(r.Rcx + 8), &data, 8, nullptr);
+                static std::atomic<int> nf{0}; int k = nf++;
+                if (used == 0x6c0 && k < 4000) { static std::atomic<int> nd{0}; if (nd++ < 3) { unsigned char b[0x6c0] = {}; ReadProcessMemory(GetCurrentProcess(), (void*)data, b, used, nullptr);
+                    char path[64]; snprintf(path, sizeof path, "T:\\chunk6c0_%d.bin", nd.load()); HANDLE f = CreateFileA(path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0); DWORD wr; if (f != INVALID_HANDLE_VALUE) { WriteFile(f, b, used, &wr, 0); CloseHandle(f); } } }
+                if (k < 200) XS_LOG("FLUSH tid=%lu local=%p used=%#x -> target=%p", GetCurrentThreadId(), (void*)r.Rcx, used, (void*)r.Rdx);
             }
             bool atLoad = (uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0x19f7d26;   // после чтения потока целиком: r15=буфер, edi=размер (GetSize)
             if (((uintptr_t)r.Rip == (uintptr_t)GetModuleHandleA(nullptr) + 0x407e700 && r.Rdx > 0x10000) || atLoad) {
@@ -274,8 +384,22 @@ static LONG CALLBACK TrapHandler(EXCEPTION_POINTERS* e)
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
+static DWORD WINAPI FreeTraceArm(void*)
+{
+    uintptr_t b0 = (uintptr_t)GetModuleHandleA(nullptr);
+    { char v[8] = {}; GetEnvironmentVariableA("XSX_FREE_TRACE", v, sizeof v); if (v[0] == '2') { uintptr_t fn = b0 + 0x187b0; DWORD o; if (VirtualProtect((void*)fn, 1, PAGE_EXECUTE_READWRITE, &o)) { g_traps[g_nTraps].addr = fn; g_traps[g_nTraps].wantRet = false; g_traps[g_nTraps].orig = *(unsigned char*)fn; g_freeFn = fn; *(unsigned char*)fn = 0xCC; VirtualProtect((void*)fn, 1, o, &o); g_nTraps++; XS_LOG("FREE-TRACE(2): трап на FreeChecked exe+0x187b0"); } return 0; } }
+    for (int i = 0; i < 12000; i++) { Sleep(10); uintptr_t obj = 0, vt = 0, fn = 0;
+        if (!ReadProcessMemory(GetCurrentProcess(), (void*)(b0 + 0xabcc310), &obj, 8, nullptr) || !obj) continue;
+        if (!ReadProcessMemory(GetCurrentProcess(), (void*)obj, &vt, 8, nullptr) || !vt || !ReadProcessMemory(GetCurrentProcess(), (void*)(vt + 0x60), &fn, 8, nullptr) || !fn) continue;
+        for (int k = 0x40; k <= 0x78; k += 8) { uintptr_t f2 = 0; ReadProcessMemory(GetCurrentProcess(), (void*)(vt + k), &f2, 8, nullptr); XS_LOG("GLOBALHEAP vt[%#x]=exe+%#llx", k, (unsigned long long)(f2 - b0)); }
+        DWORD o; if (VirtualProtect((void*)fn, 1, PAGE_EXECUTE_READWRITE, &o)) { g_traps[g_nTraps].addr = fn; g_traps[g_nTraps].wantRet = false; g_traps[g_nTraps].orig = *(unsigned char*)fn; g_freeFn = fn; *(unsigned char*)fn = 0xCC; VirtualProtect((void*)fn, 1, o, &o); g_nTraps++; XS_LOG("FREE-TRACE: трап на Free = exe+%#llx", (unsigned long long)(fn - b0)); }
+        return 0; }
+    return 0;
+}
 static void InstallTraps()
 {
+    InstallWriterTaskTrace();
+    { char v[4]; if (GetEnvironmentVariableA("XSX_FREE_TRACE", v, sizeof v)) { AddVectoredExceptionHandler(1, &TrapHandler); CreateThread(nullptr, 0, FreeTraceArm, nullptr, 0, nullptr); } }
     char env[512]; if (!GetEnvironmentVariableA("XSX_TRAP", env, sizeof env)) return;
     uintptr_t base = (uintptr_t)GetModuleHandleA(nullptr); AddVectoredExceptionHandler(1, &TrapHandler);
     for (char* t = strtok(env, ","); t && g_nTraps < 16; t = strtok(nullptr, ",")) {
@@ -354,13 +478,6 @@ extern "C" { uintptr_t g_arena_lo = 0, g_arena_hi = 0; }
 static char* g_arenaTop = nullptr; static char* g_arenaCommitted = nullptr;
 struct Wrap { void** vt; void* real; uint64_t kind; uint64_t pad[5]; };   // 64 байта
 static constexpr size_t kListObjectBytes = 0x1000; // Observed game stores extend through +0x564.
-struct ExclusiveSrwLock {
-    SRWLOCK* lock;
-    explicit ExclusiveSrwLock(SRWLOCK& value) : lock(&value) { AcquireSRWLockExclusive(lock); }
-    ~ExclusiveSrwLock() { ReleaseSRWLockExclusive(lock); }
-    ExclusiveSrwLock(const ExclusiveSrwLock&) = delete;
-    ExclusiveSrwLock& operator=(const ExclusiveSrwLock&) = delete;
-};
 static Wrap* NewWrap(void** vt, void* real, uint64_t kind)
 {
     // Initialization, commit frontier AND allocation cursor must be serialized.
@@ -501,6 +618,26 @@ static D3D12_RESOURCE_DESC PcResourceDesc(const D3D12_RESOURCE_DESC& xbox)
     }
     return pc;
 }
+static bool GuestColorFootprint(const D3D12_RESOURCE_DESC& desc, D3D12_RESOURCE_ALLOCATION_INFO& out)
+{
+    if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.MipLevels != 1 ||
+        desc.SampleDesc.Count != 1 || desc.SampleDesc.Quality ||
+        !(desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) ||
+        (desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)) return false;
+    unsigned bytes = 0;
+    const unsigned format = (unsigned)desc.Format;
+    if (format >= 1 && format <= 4) bytes = 16;
+    else if (format >= 9 && format <= 14) bytes = 8;
+    else if ((format >= 23 && format <= 32) || (format >= 87 && format <= 93) ||
+        format == 116 || format == 117 || format == 189) bytes = 4;
+    else if (format >= 48 && format <= 59) bytes = 2;
+    else if (format >= 60 && format <= 65) bytes = 1;
+    xsx::memory::Footprint info;
+    if (!xsx::memory::Color64K(desc.Width, desc.Height, desc.DepthOrArraySize,
+        bytes, (unsigned)desc.Layout, desc.Alignment, info)) return false;
+    out.SizeInBytes = info.size; out.Alignment = info.alignment;
+    return true;
+}
 static HRESULT __stdcall Dev_CreateCommittedResource76(Wrap* w, const D3D12_HEAP_PROPERTIES* hp, D3D12_HEAP_FLAGS hf, const D3D12_RESOURCE_DESC* rd,
                                                        D3D12_RESOURCE_STATES st, const D3D12_CLEAR_VALUE* cv, REFIID riid, void** out)
 {
@@ -516,13 +653,21 @@ static HRESULT __stdcall Dev_CreateCommittedResource76(Wrap* w, const D3D12_HEAP
 // ---------- трансляция CPU-handle'ов descriptor heap ----------
 // Xbox-дескриптор heap = PC D3D12_DESCRIPTOR_HEAP_DESC (16 байт) + {void* ExpectedCpuBase; size_t Size} [по стеку игры, функция 0x141cf3280].
 // Игра создаёт heap в своей памяти и требует GetCPUDescriptorHandleForHeapStart()==ExpectedCpuBase; VKD3D-handle'ы непрозрачны -> диапазоны {guest,size,real}.
-struct HRange { uint64_t guest, size, real; };
+struct HRange { uint64_t guest, size, real, gpu; };
+static uint64_t GpuHandleToGuest(uint64_t h);
 static HRange g_hr[512]; static std::atomic<int> g_hrN{0};
+#include "guest_shadow.h"
 static inline uint64_t XlatCpu(uint64_t h)
 {
     int n = g_hrN.load(std::memory_order_acquire);
     for (int i = 0; i < n; i++) { const HRange& r = g_hr[i]; if (h - r.guest < r.size) return r.real + (h - r.guest); }
     return h;
+}
+static uint64_t GpuHandleToGuest(uint64_t h)
+{
+    int n = g_hrN.load(std::memory_order_acquire);
+    for (int i = 0; i < n; i++) { const HRange& r = g_hr[i]; if (r.gpu && h - r.gpu < r.size) return r.guest + (h - r.gpu); }
+    return 0;
 }
 static void __stdcall Dev_CreateCBV(Wrap* w, const D3D12_CONSTANT_BUFFER_VIEW_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h) { h.ptr = XlatCpu(h.ptr); ((ID3D12Device*)w->real)->CreateConstantBufferView(d, h); }
 static void __stdcall Dev_CreateSRV(Wrap* w, ID3D12Resource* r, const D3D12_SHADER_RESOURCE_VIEW_DESC* d, D3D12_CPU_DESCRIPTOR_HANDLE h)
@@ -546,8 +691,20 @@ static void __stdcall List_OMSetRenderTargets(Wrap* w, UINT n, const D3D12_CPU_D
     D3D12_CPU_DESCRIPTOR_HANDLE r[8] = {}, dd = {}; UINT m = n < 8 ? n : 8; for (UINT i = 0; i < m && rtv; i++) r[i].ptr = XlatCpu(rtv[i].ptr); if (dsv) dd.ptr = XlatCpu(dsv->ptr);
     ((ID3D12GraphicsCommandList*)w->real)->OMSetRenderTargets(n, rtv ? r : nullptr, single, dsv ? &dd : nullptr);
 }
+static bool EnvOn(const char* n) { char v[4]; return GetEnvironmentVariableA(n, v, sizeof v) > 0; }
+static bool DrawTraceOn() { static bool on = EnvOn("XSX_DRAW_TRACE"); return on; }
+struct XListState { uintptr_t pso = 0; std::map<std::pair<int, uintptr_t>, std::array<uintptr_t, 4>> slots; };   // (слот, корневой индекс) -> аргументы
+static std::map<Wrap*, XListState> g_xstate; static SRWLOCK g_xstateLock = SRWLOCK_INIT;
+static void XStateRecord(Wrap* w, int slot, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d)
+{
+    ExclusiveSrwLock g(g_xstateLock); auto& st = g_xstate[w];
+    bool keyed = slot >= 35 && slot <= 46;   // таблицы/константы/корневые виды: ключ — корневой индекс
+    st.slots[{slot, keyed ? a : 0}] = { a, b, c, d };
+}
+static void DrawTrace(Wrap* w, const char* what, uint32_t x, uint32_t y);
 static void __stdcall ListSlot47(Wrap* w, D3D12_CPU_DESCRIPTOR_HANDLE h, D3D12_CLEAR_FLAGS f, FLOAT d, UINT8 st, UINT nr, const D3D12_RECT* rc)
 {
+    if (DrawTraceOn() && IsXboxList(w)) XStateRecord(w, 47, h.ptr, (uintptr_t)f, 0, 0);
     auto* list = (ID3D12GraphicsCommandList*)w->real;
     if (IsXboxList(w)) {
         // Game RVA0x328b8: RDX points to {GPU VA, size, R16/R32_UINT},
@@ -562,6 +719,7 @@ static void __stdcall ListSlot47(Wrap* w, D3D12_CPU_DESCRIPTOR_HANDLE h, D3D12_C
 }
 static void __stdcall ListSlot48(Wrap* w, uintptr_t argument, uintptr_t third, uintptr_t fourth, const D3D12_RECT* rc)
 {
+    if (DrawTraceOn() && IsXboxList(w)) XStateRecord(w, 48, argument, third, fourth, 0);
     auto* list = (ID3D12GraphicsCommandList*)w->real;
     if (IsXboxList(w)) {
         // Game RVA0x32960: (startSlot=0, viewCount, views). Each 16-byte
@@ -581,8 +739,24 @@ static Wrap* g_devWrap = nullptr;
 static const char* kKindName[] = { "?", "device", "queue", "list", "heap", "pso", "allocator", "fence", "resource" };
 static void* g_vtQueue[kObjSlots], *g_vtList[kObjSlots], *g_vtHeap[kObjSlots], *g_vtPso[kObjSlots], *g_vtAlloc[kObjSlots], *g_vtFence[kObjSlots];
 static void* g_originalRootSlots[kObjSlots];
+static bool RootTraceOn() { static bool on = EnvOn("XSX_ROOT_TRACE"); return on; }
+
+static std::atomic<int> g_rootTraceN[kObjSlots];
+template<int N> static void RootTrace(Wrap* w, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d)
+{
+    if (DrawTraceOn() && IsXboxList(w)) XStateRecord(w, N, a, b, c, d);
+    if (!RootTraceOn() || !IsXboxList(w)) return;
+    int n = ++g_rootTraceN[N]; if (n > 10) return;
+    XS_LOG("ROOTTRACE list=%p slot %d (+0x%x) #%d a=%p b=%p c=%p d=%p", (void*)w, N, N * 8, n, (void*)a, (void*)b, (void*)c, (void*)d);
+}
+template<int N> static void __stdcall TraceFwdSlot(Wrap* w, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d)
+{
+    RootTrace<N>(w, a, b, c, d);
+    ((void (__stdcall*)(Wrap*, uintptr_t, uintptr_t, uintptr_t, uintptr_t))g_originalRootSlots[N])(w, a, b, c, d);
+}
 template<int N> static void __stdcall BootstrapRootSlot(Wrap* w, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d)
 {
+    RootTrace<N>(w, a, b, c, d);
     if (BootstrapNoopEnabled() && IsXboxList(w)) {
         // Diagnostic shaders have an empty root layout. Suppress guest root
         // writes consistently, including after Draw/Dispatch bound that layout.
@@ -620,6 +794,7 @@ static HRESULT __stdcall Obj_GetDevice(Wrap* w, REFIID riid, void** out) { retur
 static HRESULT WrapOutput(HRESULT hr, void** out, void** vt, int kind)
 {
     if (FAILED(hr)) return hr;
+    if (kind == 8) { static bool off = [] { char v[4]; return GetEnvironmentVariableA("XSX_NO_RESWRAP", v, sizeof v) > 0; }(); if (off) return hr; }
     if (!out || !*out) return E_FAIL;
     void* real = *out;
     *out = NewWrap(vt, real, kind);
@@ -633,9 +808,63 @@ static HRESULT WrapOutput(HRESULT hr, void** out, void** vt, int kind)
 // VKD3D возвращает VA 0 для текстур (и VA, не являющийся CPU-адресом, для буферов). Как у VIctory (victory-gpu resource.rs `gpu_address`):
 // у текстуры есть CPU-«тень» (память игры), её адрес и отдаётся как GPU VA. Синхронизации тени с PC-текстурой НЕТ (раскладка Xbox — тайлинг,
 // нужен detile): пока тень лишь предотвращает падения; буферы отдают настоящий VA VKD3D.
-struct ResExtra { void* shadow; size_t size; };
+using ResourceFreeHook = void (__stdcall*)(void*, uint64_t);
+struct ResExtra {
+    void* shadow; size_t size; unsigned shadowMaps = 0;
+    // Only eager committed127 allocations carry ownership. Placed addresses
+    // and legacy lazy shadows retain their existing ownership policy.
+    void* ownedBase = nullptr;
+    ResourceFreeHook freeHook = nullptr;
+    uint64_t attributes = 0;
+    D3D12_RESOURCE_STATES presentState = D3D12_RESOURCE_STATE_COMMON;
+    bool presentStateKnown = false;
+};
 static std::map<void*, ResExtra> g_resShadow;   // wrapper -> тень (под g_resLock)
 static SRWLOCK g_resLock = SRWLOCK_INIT;
+static bool PresentSourceState(void* exposed, D3D12_RESOURCE_STATES& state)
+{
+    SharedSrwLock held(g_resLock);
+    auto it = g_resShadow.find(exposed);
+    if (it == g_resShadow.end() || !it->second.presentStateKnown) return false;
+    state = it->second.presentState;
+    return true;
+}
+static void InvalidatePresentState(void* exposed)
+{
+    ExclusiveSrwLock held(g_resLock);
+    // A null aliasing endpoint means any resource, not an empty set.
+    if (!exposed) {
+        for (auto& entry : g_resShadow) entry.second.presentStateKnown = false;
+        return;
+    }
+    auto it = g_resShadow.find(exposed);
+    if (it != g_resShadow.end()) it->second.presentStateKnown = false;
+}
+static void ForgetResourceAddress(Wrap* resource, void* address);
+static void FreeOwnedShadow(const ResExtra& extra)
+{
+    if (!extra.ownedBase) return;
+    if (extra.freeHook) extra.freeHook(extra.shadow, extra.attributes);
+    else VirtualFree(extra.ownedBase, 0, MEM_RELEASE);
+}
+static ULONG __stdcall Res_Release(Wrap* w)
+{
+    const ULONG refs = ((IUnknown*)w->real)->Release();
+    if (!refs) {
+        ResExtra extra{};
+        {
+            ExclusiveSrwLock held(g_resLock);
+            auto it = g_resShadow.find(w);
+            if (it != g_resShadow.end()) { extra = it->second; g_resShadow.erase(it); }
+        }
+        // Never call a title allocator while holding our registry lock.
+        if (extra.ownedBase) {
+            ForgetResourceAddress(w, extra.shadow);
+            FreeOwnedShadow(extra);
+        }
+    }
+    return refs;
+}
 static D3D12_GPU_VIRTUAL_ADDRESS __stdcall Res_GetGPUVirtualAddress(Wrap* w)
 {
     ID3D12Resource* r = (ID3D12Resource*)w->real; D3D12_RESOURCE_DESC d = r->GetDesc();
@@ -647,11 +876,56 @@ static D3D12_GPU_VIRTUAL_ADDRESS __stdcall Res_GetGPUVirtualAddress(Wrap* w)
         if (dev) { D3D12_RESOURCE_ALLOCATION_INFO ai = dev->GetResourceAllocationInfo(0, 1, &d); if (ai.SizeInBytes != ~0ull) sz = (size_t)ai.SizeInBytes; dev->Release(); }
         if (sz > (1ull << 30)) sz = (size_t)1 << 30;
         sz = (sz + 0xffff) & ~(size_t)0xffff;
-        void* m = VirtualAlloc(nullptr, sz, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-        XS_LOG("RESOURCE %p (%llux%u fmt=%d) GetGPUVirtualAddress -> CPU-тень %p size=%#zx (UMA-эмуляция; синхронизации с PC-текстурой нет)", (void*)w, (unsigned long long)d.Width, d.Height, (int)d.Format, m, sz);
+        // Память ресурса берём из аллокатора ИГРЫ (хук __XMemAllocationHooks__, как VIctory `Memory::for_resource`): игра при освобождении ищет
+        // адрес в своём дереве аллокаций — чужой VirtualAlloc-адрес даёт NULL в дереве и AV (exe+0x515acf5).
+        // attrs = GRAPHICS_ALLOCATOR(128<<16) | pages<<14 | log2(align)<<24 | memtype<<29 (по VIctory resource.rs; поля pages/memtype — предположение).
+        void* m = nullptr; { typedef void* (*AllocHook)(size_t, uint64_t); auto hooks = (void**)GetProcAddress(GetModuleHandleW(nullptr), "__XMemAllocationHooks__");
+            if (hooks && hooks[0]) { uint64_t pages = sz >= (2u << 20) ? 2 : 1; uint64_t lg = sz >= (2u << 20) ? 21 : 16; uint64_t attrs = (128ull << 16) | (pages << 14) | (lg << 24) | (1ull << 29);
+                m = ((AllocHook)hooks[0])(sz, attrs); } }
+        bool viaTitle = m != nullptr; if (!m) m = VirtualAlloc(nullptr, sz, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        XS_LOG("RESOURCE %p via=%s (%llux%u fmt=%d) GetGPUVirtualAddress -> CPU-тень %p size=%#zx (UMA-эмуляция; синхронизации с PC-текстурой нет)", (void*)w, viaTitle ? "аллокатор игры" : "VirtualAlloc", (unsigned long long)d.Width, d.Height, (int)d.Format, m, sz);
         it = g_resShadow.emplace(w, ResExtra{m, sz}).first;
     }
     return (D3D12_GPU_VIRTUAL_ADDRESS)(uintptr_t)it->second.shadow;
+}
+static HRESULT __stdcall Res_Map(Wrap* w, UINT subresource, const D3D12_RANGE* readRange, void** data)
+{
+    auto* real = (ID3D12Resource*)w->real;
+    const HRESULT native = real->Map(subresource, readRange, data);
+    if (native != E_INVALIDARG || subresource != 0 ||
+        real->GetDesc().Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D) return native;
+    // Game+0x5121891 maps subresource0, then adds its own footprint offset.
+    // DEFAULT PC textures are unmappable; Xbox UMA uses the title memory
+    // already exposed by GetGPUVirtualAddress. Do not invent mip offsets or
+    // mask device removal/OOM. This is CPU shadow access, not GPU coherence.
+    if (data) *data = nullptr;
+    const uintptr_t address = (uintptr_t)Res_GetGPUVirtualAddress(w);
+    if (!address) return E_OUTOFMEMORY;
+    {
+        ExclusiveSrwLock held(g_resLock);
+        auto it = g_resShadow.find(w);
+        if (it == g_resShadow.end()) return native;
+        if (readRange && (readRange->Begin > readRange->End ||
+            (it->second.size && readRange->End > it->second.size))) return E_INVALIDARG;
+        ++it->second.shadowMaps;
+    }
+    if (data) *data = (void*)address;
+    static std::atomic<unsigned> calls{0};
+    const unsigned n = ++calls;
+    if (n <= 12 || !(n % 1000)) XS_LOG("RESOURCE Map subresource0 native=0x%08lX -> CPU-shadow S_OK resource=%p data=%p (no GPU upload/detile)", (unsigned long)native, (void*)w, (void*)address);
+    return S_OK;
+}
+static void __stdcall Res_Unmap(Wrap* w, UINT subresource, const D3D12_RANGE* writtenRange)
+{
+    if (subresource == 0) {
+        ExclusiveSrwLock held(g_resLock);
+        auto it = g_resShadow.find(w);
+        if (it != g_resShadow.end() && it->second.shadowMaps) {
+            --it->second.shadowMaps;
+            return; // No native Map succeeded for this shadow mapping.
+        }
+    }
+    ((ID3D12Resource*)w->real)->Unmap(subresource, writtenRange);
 }
 #include "fence_mirror.h"
 static HRESULT __stdcall QueueSignal14(Wrap* w, ID3D12Fence* fence, UINT64 value)
@@ -680,101 +954,226 @@ static HRESULT __stdcall QueueSlot16(Wrap* w, void* argument, UINT64 value)
     // Keep the PC bootstrap's real GetTimestampFrequency contract intact.
     return ((ID3D12CommandQueue*)w->real)->GetTimestampFrequency((UINT64*)argument);
 }
+#include "list_writes.h"
 static void __stdcall Queue_ExecuteCommandLists(Wrap* w, UINT n, ID3D12CommandList* const* lists)
 {
-    std::vector<ID3D12CommandList*> r(n); for (UINT i = 0; i < n; i++) r[i] = (ID3D12CommandList*)Unwrap(lists[i]);
-    ((ID3D12CommandQueue*)w->real)->ExecuteCommandLists(n, r.data());
+    const HRESULT hr = SubmitListsWithWrites(w, n, lists);
+    if (FAILED(hr)) XS_LOG("ExecuteCommandLists deferred write failure hr=0x%08lX", (unsigned long)hr);
     if (BootstrapNoopEnabled()) ++g_bootstrap.execute;
 }
 // ---- PresentX -> DXGI swapchain на окне игры ----
 // Plane (по VIctory queue.rs): { u64 token; u32 count; This* resources } — показывается первый ресурс первой плоскости.
 // Окно игры находим сами (EnumWindows по PID), swapchain FLIP_DISCARD x2 на ПЕРВОЙ DIRECT-очереди, в которую пришёл PresentX.
-// Содержимое: копия кадра игры (если тип/размер совместимы) либо цветной тест-паттерн (XSX_PRESENT_PATTERN=1 — всегда паттерн): доказывает работу присента.
+// Native color presentation: copy equal surfaces, otherwise sample with a
+// private PC shader. This does not translate title shaders or upload CPU shadows.
 struct PresentState {
-    bool tried = false, ok = false; HWND hwnd = nullptr; IDXGISwapChain3* sc = nullptr; ID3D12CommandQueue* q = nullptr; ID3D12Device* dev = nullptr;
-    ID3D12DescriptorHeap* rtvHeap = nullptr; UINT rtvInc = 0; ID3D12CommandAllocator* alloc[2] = {}; ID3D12GraphicsCommandList* list = nullptr;
-    ID3D12Fence* fence = nullptr; HANDLE ev = nullptr; UINT64 fv = 0; UINT w = 0, h = 0; UINT frame = 0; HRESULT lastHr = S_OK;
+    bool tried = false, ok = false, poisoned = false, blitTried = false;
+    HWND hwnd = nullptr; HMODULE dxgi = nullptr;
+    IDXGISwapChain3* sc = nullptr; ID3D12CommandQueue* q = nullptr; ID3D12Device* dev = nullptr;
+    ID3D12DescriptorHeap* rtvHeap = nullptr; UINT rtvInc = 0;
+    ID3D12CommandAllocator* alloc[2] = {}; ID3D12GraphicsCommandList* list = nullptr;
+    ID3D12Fence* fence = nullptr; HANDLE ev = nullptr; UINT64 fv = 0;
+    UINT w = 0, h = 0, frame = 0; HRESULT lastHr = S_OK, blitHr = S_OK;
+    // Process-lifetime objects, like the existing swapchain. Per-frame source
+    // references are explicitly released after our fence, never from DllMain.
+    xsx::presentation::SurfaceBlit* blit = nullptr;
+    IUnknown* pendingGuest = nullptr;
 };
 static PresentState g_pr; static SRWLOCK g_prLock = SRWLOCK_INIT;
+static void ReleasePresentSource()
+{
+    // Drop the native reference first. The wrapper's final Release must own
+    // CPU-shadow cleanup; dropping the last reference behind it would leak it.
+    if (g_pr.blit) g_pr.blit->ReleaseSource();
+    IUnknown* previous = g_pr.pendingGuest; g_pr.pendingGuest = nullptr;
+    if (previous) previous->Release();
+}
 static BOOL CALLBACK FindGameWindow(HWND h, LPARAM lp)
 {
     DWORD pid = 0; GetWindowThreadProcessId(h, &pid); if (pid != GetCurrentProcessId() || !IsWindowVisible(h)) return TRUE;
     RECT r; GetClientRect(h, &r); long area = (r.right - r.left) * (r.bottom - r.top); HWND* best = (HWND*)lp;
     RECT rb = {}; if (*best) GetClientRect(*best, &rb); if (area > (rb.right - rb.left) * (rb.bottom - rb.top)) *best = h; return TRUE;
 }
-static bool InitPresent(Wrap* qw)
+static HRESULT InitPresent(Wrap* qw)
 {
-    HWND hw = nullptr; EnumWindows(FindGameWindow, (LPARAM)&hw); if (!hw) return false;
-    RECT cr; GetClientRect(hw, &cr); UINT W = cr.right - cr.left, H = cr.bottom - cr.top; if (!W || !H) return false;
-    g_pr.tried = true; g_pr.hwnd = hw; g_pr.w = W; g_pr.h = H;
-    ID3D12CommandQueue* q = (ID3D12CommandQueue*)qw->real; D3D12_COMMAND_QUEUE_DESC qd = q->GetDesc();
-    if (qd.Type != D3D12_COMMAND_LIST_TYPE_DIRECT) { XS_LOG("PRESENT: очередь PresentX не DIRECT (type=%d) — swapchain откладывается", (int)qd.Type); g_pr.tried = false; return false; }
-    q->GetDevice(__uuidof(ID3D12Device), (void**)&g_pr.dev); g_pr.q = q;
-    HMODULE dx = LoadLibraryW(L"dxgi.dll"); typedef HRESULT (WINAPI* CF)(UINT, REFIID, void**); CF cf = (CF)GetProcAddress(dx, "CreateDXGIFactory2");
-    IDXGIFactory2* fac = nullptr; HRESULT hr = cf ? cf(0, __uuidof(IDXGIFactory2), (void**)&fac) : E_FAIL;
-    if (FAILED(hr)) { XS_LOG("PRESENT: CreateDXGIFactory2 hr=0x%08lX", (unsigned long)hr); return false; }
-    DXGI_SWAP_CHAIN_DESC1 d = {}; d.Width = W; d.Height = H; d.Format = DXGI_FORMAT_R8G8B8A8_UNORM; d.SampleDesc.Count = 1; d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    d.BufferCount = 2; d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD; IDXGISwapChain1* sc1 = nullptr;
-    hr = fac->CreateSwapChainForHwnd(q, hw, &d, nullptr, nullptr, &sc1); fac->Release();
-    if (FAILED(hr)) { XS_LOG("PRESENT: CreateSwapChainForHwnd(%ux%u) hr=0x%08lX", W, H, (unsigned long)hr); return false; }
-    sc1->QueryInterface(__uuidof(IDXGISwapChain3), (void**)&g_pr.sc); sc1->Release(); if (!g_pr.sc) return false;
-    D3D12_DESCRIPTOR_HEAP_DESC hd = {}; hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV; hd.NumDescriptors = 2;
-    g_pr.dev->CreateDescriptorHeap(&hd, __uuidof(ID3D12DescriptorHeap), (void**)&g_pr.rtvHeap); g_pr.rtvInc = g_pr.dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-    for (int i = 0; i < 2; i++) g_pr.dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), (void**)&g_pr.alloc[i]);
-    g_pr.dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_pr.alloc[0], nullptr, __uuidof(ID3D12GraphicsCommandList), (void**)&g_pr.list); g_pr.list->Close();
-    g_pr.dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void**)&g_pr.fence); g_pr.ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    g_pr.ok = true; XS_LOG("PRESENT: swapchain %ux%u на окне %p (flip-discard x2, R8G8B8A8) создан", W, H, (void*)hw); return true;
+    HWND hw = nullptr; EnumWindows(FindGameWindow, (LPARAM)&hw); if (!hw) return S_FALSE;
+    RECT cr{}; if (!GetClientRect(hw, &cr)) return HRESULT_FROM_WIN32(GetLastError());
+    const UINT width = cr.right - cr.left, height = cr.bottom - cr.top;
+    if (!width || !height) return S_FALSE;
+    auto* queue = (ID3D12CommandQueue*)qw->real;
+    if (queue->GetDesc().Type != D3D12_COMMAND_LIST_TYPE_DIRECT) return S_FALSE;
+    g_pr.tried = true; g_pr.hwnd = hw; g_pr.w = width; g_pr.h = height;
+    HRESULT hr = [&]() -> HRESULT {
+        HRESULT result = queue->GetDevice(__uuidof(ID3D12Device), (void**)&g_pr.dev);
+        if (FAILED(result)) return result;
+        g_pr.q = queue; queue->AddRef();
+        g_pr.dxgi = LoadLibraryW(L"dxgi.dll");
+        using Factory = HRESULT (WINAPI*)(UINT, REFIID, void**);
+        auto create = xsx::presentation::Symbol<Factory>(g_pr.dxgi, "CreateDXGIFactory2");
+        if (!create) return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+        xsx::presentation::Ref<IDXGIFactory2> factory;
+        result = create(0, __uuidof(IDXGIFactory2), (void**)factory.Put());
+        if (FAILED(result)) return result;
+        DXGI_SWAP_CHAIN_DESC1 desc{};
+        desc.Width = width; desc.Height = height; desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.SampleDesc.Count = 1; desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        desc.BufferCount = 2; desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        xsx::presentation::Ref<IDXGISwapChain1> initial;
+        result = factory->CreateSwapChainForHwnd(queue, hw, &desc, nullptr, nullptr, initial.Put());
+        if (FAILED(result)) return result;
+        result = initial->QueryInterface(__uuidof(IDXGISwapChain3), (void**)&g_pr.sc);
+        if (FAILED(result)) return result;
+        D3D12_DESCRIPTOR_HEAP_DESC heap{}; heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV; heap.NumDescriptors = 2;
+        result = g_pr.dev->CreateDescriptorHeap(&heap, __uuidof(ID3D12DescriptorHeap), (void**)&g_pr.rtvHeap);
+        if (FAILED(result)) return result;
+        g_pr.rtvInc = g_pr.dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        for (auto& allocator : g_pr.alloc) {
+            result = g_pr.dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                __uuidof(ID3D12CommandAllocator), (void**)&allocator);
+            if (FAILED(result)) return result;
+        }
+        result = g_pr.dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_pr.alloc[0], nullptr,
+            __uuidof(ID3D12GraphicsCommandList), (void**)&g_pr.list);
+        if (FAILED(result)) return result;
+        result = g_pr.list->Close(); if (FAILED(result)) return result;
+        result = g_pr.dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void**)&g_pr.fence);
+        if (FAILED(result)) return result;
+        g_pr.ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!g_pr.ev) return HRESULT_FROM_WIN32(GetLastError());
+        g_pr.blit = new (std::nothrow) xsx::presentation::SurfaceBlit;
+        if (!g_pr.blit) return E_OUTOFMEMORY;
+        // Compile lazily only when scaling is needed; the copy/pattern path
+        // remains usable if a compiler is absent.
+        return S_OK;
+    }();
+    g_pr.lastHr = hr;
+    if (FAILED(hr)) {
+        delete g_pr.blit; g_pr.blit = nullptr;
+        if (g_pr.ev) { CloseHandle(g_pr.ev); g_pr.ev = nullptr; }
+        auto release = [](auto*& value) { if (value) { value->Release(); value = nullptr; } };
+        release(g_pr.fence); release(g_pr.list);
+        for (auto& allocator : g_pr.alloc) release(allocator);
+        release(g_pr.rtvHeap); release(g_pr.sc); release(g_pr.q); release(g_pr.dev);
+        if (g_pr.dxgi) { FreeLibrary(g_pr.dxgi); g_pr.dxgi = nullptr; }
+        XS_LOG("PRESENT initialization failed hr=0x%08lX", (unsigned long)hr);
+        return hr;
+    }
+    g_pr.ok = true;
+    XS_LOG("PRESENT swapchain=%ux%u window=%p format=28 buffers=2", width, height, (void*)hw);
+    return S_OK;
 }
-static void PresentFrame(Wrap* qw, ID3D12Resource* src)
+static HRESULT PresentFrame(Wrap* qw, IUnknown* exposedSource)
 {
+    using xsx::presentation::Transition;
     ExclusiveSrwLock held(g_prLock);
-    if (!g_pr.ok && !g_pr.tried) InitPresent(qw);
-    if (!g_pr.ok) return;
-    UINT bi = g_pr.sc->GetCurrentBackBufferIndex(); ID3D12Resource* bb = nullptr; g_pr.sc->GetBuffer(bi, __uuidof(ID3D12Resource), (void**)&bb); if (!bb) return;
-    D3D12_CPU_DESCRIPTOR_HANDLE h = g_pr.rtvHeap->GetCPUDescriptorHandleForHeapStart(); h.ptr += (SIZE_T)bi * g_pr.rtvInc;
-    g_pr.dev->CreateRenderTargetView(bb, nullptr, h);
-    if (g_pr.fence->GetCompletedValue() < g_pr.fv) { g_pr.fence->SetEventOnCompletion(g_pr.fv, g_pr.ev); WaitForSingleObject(g_pr.ev, 2000); }
-    g_pr.alloc[bi]->Reset(); g_pr.list->Reset(g_pr.alloc[bi], nullptr);
-    D3D12_RESOURCE_BARRIER b = {}; b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b.Transition.pResource = bb; b.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT; b.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-    g_pr.list->ResourceBarrier(1, &b);
-    bool copied = false;
-    static bool pattern = [] { char v[4]; return GetEnvironmentVariableA("XSX_PRESENT_PATTERN", v, sizeof v) > 0; }();
-    if (src && g_pr.frame < 3) { D3D12_RESOURCE_DESC sd = src->GetDesc(); XS_LOG("PRESENT: ресурс кадра игры %llux%u fmt=%d dim=%d flags=%#x mips=%u samples=%u", (unsigned long long)sd.Width, sd.Height, (int)sd.Format, (int)sd.Dimension, (unsigned)sd.Flags, sd.MipLevels, sd.SampleDesc.Count); }
-    if (src && !pattern) {   // копия кадра: нужны совпадающие размер и формат (иначе — паттерн)
-        D3D12_RESOURCE_DESC sd = src->GetDesc(), bd = bb->GetDesc();
-        if (sd.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D && sd.Width == bd.Width && sd.Height == bd.Height && sd.Format == bd.Format && sd.SampleDesc.Count == 1) {
-            D3D12_RESOURCE_BARRIER b2 = b; b2.Transition.pResource = src; b2.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON; b2.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
-            b.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST; g_pr.list->ResourceBarrier(1, &b); g_pr.list->ResourceBarrier(1, &b2);
-            g_pr.list->CopyResource(bb, src); std::swap(b2.Transition.StateBefore, b2.Transition.StateAfter); g_pr.list->ResourceBarrier(1, &b2);
-            b.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST; b.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT; copied = true;
+    if (!g_pr.ok && !g_pr.tried) {
+        const HRESULT hr = InitPresent(qw);
+        if (hr != S_OK) return FAILED(hr) ? hr : S_OK;
+    }
+    if (!g_pr.ok || g_pr.poisoned) return g_pr.lastHr;
+    // Cross-queue production requires an explicit dependency, not an assumed
+    // completion. The observed title presents on this same DIRECT queue.
+    if (qw->real != g_pr.q) return E_INVALIDARG;
+    auto fail = [&](const char* stage, HRESULT hr) {
+        g_pr.lastHr = hr; g_pr.poisoned = true;
+        XS_LOG("PRESENT failure stage=%s frame=%u hr=0x%08lX", stage, g_pr.frame, (unsigned long)hr);
+        return hr;
+    };
+    const UINT64 completed = g_pr.fence->GetCompletedValue();
+    if (completed == UINT64_MAX) return fail("device-removed", DXGI_ERROR_DEVICE_REMOVED);
+    if (completed < g_pr.fv) {
+        const HRESULT hr = g_pr.fence->SetEventOnCompletion(g_pr.fv, g_pr.ev);
+        if (FAILED(hr)) return fail("fence-event", hr);
+        const DWORD waited = WaitForSingleObject(g_pr.ev, 5000);
+        if (waited != WAIT_OBJECT_0) return fail("fence-wait",
+            HRESULT_FROM_WIN32(waited == WAIT_TIMEOUT ? ERROR_TIMEOUT : GetLastError()));
+        const UINT64 finished = g_pr.fence->GetCompletedValue();
+        if (finished == UINT64_MAX) return fail("device-removed", DXGI_ERROR_DEVICE_REMOVED);
+        if (finished < g_pr.fv) return fail("fence-incomplete", E_UNEXPECTED);
+    }
+    ReleasePresentSource();
+    const UINT index = g_pr.sc->GetCurrentBackBufferIndex();
+    xsx::presentation::Ref<ID3D12Resource> target;
+    HRESULT hr = g_pr.sc->GetBuffer(index, __uuidof(ID3D12Resource), (void**)target.Put());
+    if (FAILED(hr)) return fail("backbuffer", hr);
+    auto handle = g_pr.rtvHeap->GetCPUDescriptorHandleForHeapStart(); handle.ptr += (SIZE_T)index * g_pr.rtvInc;
+    g_pr.dev->CreateRenderTargetView(target.Get(), nullptr, handle);
+    hr = g_pr.alloc[index]->Reset(); if (FAILED(hr)) return fail("allocator-reset", hr);
+    hr = g_pr.list->Reset(g_pr.alloc[index], nullptr); if (FAILED(hr)) return fail("list-reset", hr);
+    auto* source = (ID3D12Resource*)Unwrap(exposedSource);
+    D3D12_RESOURCE_DESC sourceDesc{};
+    if (source) sourceDesc = source->GetDesc();
+    D3D12_RESOURCE_STATES sourceState = D3D12_RESOURCE_STATE_COMMON;
+    const bool stateKnown = source && PresentSourceState(exposedSource, sourceState);
+    static const bool pattern = [] { char value[4]; return GetEnvironmentVariableA("XSX_PRESENT_PATTERN", value, sizeof value) > 0; }();
+    enum Mode { Pattern, Copy, Scale } mode = Pattern;
+    const char* reason = pattern ? "forced" : !source ? "missing-source" : !stateKnown ? "unknown-source-state" : "unsupported-source";
+    const auto targetDesc = target->GetDesc();
+    if (!pattern && stateKnown && xsx::presentation::SurfaceBlit::Supports(sourceDesc)) {
+        if (sourceDesc.Width == targetDesc.Width && sourceDesc.Height == targetDesc.Height && sourceDesc.Format == targetDesc.Format) mode = Copy;
+        else {
+            if (!g_pr.blitTried) {
+                g_pr.blitTried = true; g_pr.blitHr = g_pr.blit->Initialize(g_pr.dev);
+                if (FAILED(g_pr.blitHr)) XS_LOG("PRESENT blit unavailable hr=0x%08lX", (unsigned long)g_pr.blitHr);
+            }
+            if (SUCCEEDED(g_pr.blitHr)) mode = Scale;
+            else reason = "blit-initialize-failed";
         }
     }
-    if (!copied) {   // тест-паттерн: плавно меняющийся цвет
-        float t = (float)(g_pr.frame % 240) / 240.f; float c[4] = { 0.15f + 0.6f * t, 0.1f + 0.3f * (1 - t), 0.45f, 1.f };
-        g_pr.list->ClearRenderTargetView(h, c, 0, nullptr); b.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET; b.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+    if (mode != Pattern) {
+        exposedSource->AddRef(); g_pr.pendingGuest = exposedSource;
     }
-    g_pr.list->ResourceBarrier(1, &b); g_pr.list->Close();
-    ID3D12CommandList* lists[] = { g_pr.list }; g_pr.q->ExecuteCommandLists(1, lists);
-    HRESULT hr = g_pr.sc->Present(0, 0); g_pr.lastHr = hr; g_pr.q->Signal(g_pr.fence, ++g_pr.fv); bb->Release();
-    if (g_pr.frame < 6 || FAILED(hr)) XS_LOG("PRESENT: кадр %u -> %s, Present hr=0x%08lX", g_pr.frame, copied ? "копия кадра игры" : "тест-паттерн", (unsigned long)hr);
-    g_pr.frame++;
+    const auto targetState = mode == Copy ? D3D12_RESOURCE_STATE_COPY_DEST : D3D12_RESOURCE_STATE_RENDER_TARGET;
+    Transition(g_pr.list, target.Get(), D3D12_RESOURCE_STATE_PRESENT, targetState);
+    if (mode == Copy) {
+        Transition(g_pr.list, source, sourceState, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        g_pr.list->CopyResource(target.Get(), source);
+        Transition(g_pr.list, source, D3D12_RESOURCE_STATE_COPY_SOURCE, sourceState);
+    } else if (mode == Scale) {
+        hr = g_pr.blit->Record(g_pr.list, source, sourceState, (UINT)targetDesc.Width, targetDesc.Height, handle);
+        if (FAILED(hr)) { ReleasePresentSource(); return fail("blit-record", hr); }
+    } else {
+        const float phase = (float)(g_pr.frame % 240) / 240.f;
+        const float color[4]{0.15f + 0.6f * phase, 0.1f + 0.3f * (1 - phase), 0.45f, 1.f};
+        g_pr.list->ClearRenderTargetView(handle, color, 0, nullptr);
+    }
+    Transition(g_pr.list, target.Get(), targetState, D3D12_RESOURCE_STATE_PRESENT);
+    hr = g_pr.list->Close();
+    if (FAILED(hr)) { ReleasePresentSource(); return fail("list-close", hr); }
+    ID3D12CommandList* commands[]{g_pr.list}; g_pr.q->ExecuteCommandLists(1, commands);
+    const HRESULT presented = g_pr.sc->Present(0, 0);
+    hr = g_pr.q->Signal(g_pr.fence, ++g_pr.fv);
+    // On failed signal retain both source refs and prohibit reuse: completion
+    // is unknown, so recycling the descriptor or allocator would be unsafe.
+    if (FAILED(hr)) return fail("fence-signal", hr);
+    g_pr.lastHr = presented;
+    if (g_pr.frame < 6 || FAILED(presented)) XS_LOG("PRESENT frame=%u mode=%s source=%llux%u format=%u state=%#x target=%llux%u reason=%s hr=0x%08lX",
+        g_pr.frame, mode == Copy ? "copied-surface" : mode == Scale ? "scaled-surface" : "test-pattern",
+        (unsigned long long)sourceDesc.Width, sourceDesc.Height, (unsigned)sourceDesc.Format, (unsigned)sourceState,
+        (unsigned long long)targetDesc.Width, targetDesc.Height, mode == Pattern ? reason : "none", (unsigned long)presented);
+    ++g_pr.frame;
+    return presented;
 }
 static HRESULT __stdcall QueuePresent32(Wrap* w, UINT planes, const void* a, const void* b2)
 {
     const unsigned count = ++g_bootstrap.present;
-    ID3D12Resource* src = nullptr;
+    IUnknown* exposed = nullptr; ID3D12Resource* src = nullptr;
     if (a && !IsBadReadPtr(a, 24)) { const uint64_t* pl = (const uint64_t*)a; uint32_t cnt = (uint32_t)pl[1]; void* res = (void*)pl[2];
         if (count <= 3) XS_LOG("PresentX plane[0]: token=%#llx count=%u resources=%p (arg2=%p)", (unsigned long long)pl[0], cnt, res, b2);
-        if (count <= 3 && res && !IsBadReadPtr(res, 32)) { const uint64_t* q = (const uint64_t*)res; XS_LOG("PresentX resources[0..3]=%p %p %p %p arena=[%p,%p)", (void*)q[0], (void*)q[1], (void*)q[2], (void*)q[3], (void*)g_arena_lo, (void*)g_arena_hi); }
-        if (cnt && res && !IsBadReadPtr(res, 8)) { void* r0 = *(void**)res; if (r0) src = (ID3D12Resource*)Unwrap(r0); } }
-    PresentFrame(w, src);
+        if (count <= 3 && res && !IsBadReadPtr(res, 32)) { const uint64_t* q = (const uint64_t*)res; XS_LOG("PresentX resources rva=exe+%#llx [0..3]=%p %p %p %p arena=[%p,%p)", (unsigned long long)((uintptr_t)res - (uintptr_t)GetModuleHandleA(nullptr)), (void*)q[0], (void*)q[1], (void*)q[2], (void*)q[3], (void*)g_arena_lo, (void*)g_arena_hi);
+            const uint64_t* pp = (const uint64_t*)a; XS_LOG("PresentX arg a dump: %p %p %p %p %p %p %p %p", (void*)pp[0], (void*)pp[1], (void*)pp[2], (void*)pp[3], (void*)pp[4], (void*)pp[5], (void*)pp[6], (void*)pp[7]);
+            for (int k = 2; k <= 4; k++) { void* pk = (void*)pp[k]; if (pk && !IsBadReadPtr(pk, 32)) { const uint64_t* z = (const uint64_t*)pk; char who[160]; CallerStr((void*)z[0], who, sizeof who); XS_LOG("PresentX a[%d] -> %p %p %p %p  (z0=%s)", k, (void*)z[0], (void*)z[1], (void*)z[2], (void*)z[3], who); } }
+            if (b2 && !IsBadReadPtr(b2, 64)) { const uint64_t* bp = (const uint64_t*)b2; XS_LOG("PresentX arg b dump: %p %p %p %p %p %p %p %p", (void*)bp[0], (void*)bp[1], (void*)bp[2], (void*)bp[3], (void*)bp[4], (void*)bp[5], (void*)bp[6], (void*)bp[7]); } }
+        if (cnt && res && !IsBadReadPtr(res, 8)) { void* r0 = *(void**)res; if (r0) { exposed = (IUnknown*)r0; src = (ID3D12Resource*)Unwrap(r0); } } }
+    { static std::atomic<int> nn{0}, nz{0}; if (src) { if (nn++ < 3) XS_LOG("PresentX: НЕНУЛЕВОЙ ресурс кадра %p (present #%u)", (void*)src, count); } else nz++; if (count % 200 == 0) XS_LOG("PresentX: итого без ресурса=%d с ресурсом=%d", nz.load(), nn.load()); }
+    const HRESULT hr = PresentFrame(w, exposed);
     if (count <= 8 || !(count % 1000)) {
         CALLER(c);
         XS_LOG("BOOTSTRAP PresentX attempt=%u planes=%u pso=%u set=%u barriers=%u draw=%u dispatch=%u execute=%u native_present=%d noop=%u caller=%s",
             count, planes, g_bootstrap.pso.load(), g_bootstrap.set.load(), g_bootstrap.barriers.load(),
             g_bootstrap.draw.load(), g_bootstrap.dispatch.load(), g_bootstrap.execute.load(), g_pr.ok ? 1 : 0, BootstrapNoopEnabled(), c);
     }
-    return S_OK;
+    return hr;
 }
 // Game RVA0x24841a6 consumes an output UINT64 as a GPU timestamp frequency.
 // Xbox queue slot18 differs from PC slot18 (GetDesc); call the typed PC API.
@@ -824,16 +1223,19 @@ static void __stdcall List_ResolveQuery54(Wrap* w, ID3D12QueryHeap* heap, D3D12_
 }
 static void __stdcall List_SetDescriptorHeaps(Wrap* w, UINT n, ID3D12DescriptorHeap* const* heaps)
 {
+    if (RootTraceOn() && IsXboxList(w)) { static std::atomic<int> k{0}; if (++k <= 10) { auto* h0 = n ? (Wrap*)heaps[0] : nullptr; XS_LOG("ROOTTRACE SetDescriptorHeaps n=%u heaps[0]=%p heaps[1]=%p", n, (void*)h0, n > 1 ? (void*)heaps[1] : nullptr); } }
     ID3D12DescriptorHeap* r[8] = {}; for (UINT i = 0; i < n && i < 8; i++) r[i] = (ID3D12DescriptorHeap*)Unwrap(heaps[i]);
     ((ID3D12GraphicsCommandList*)w->real)->SetDescriptorHeaps(n < 8 ? n : 8, r);
 }
 static void __stdcall List_SetPipelineState(Wrap* w, ID3D12PipelineState* p)
 {
+    if (DrawTraceOn() && IsXboxList(w)) { ExclusiveSrwLock g(g_xstateLock); g_xstate[w].pso = (uintptr_t)p; }
     if (BootstrapNoopEnabled() && IsXboxList(w)) { if (BindBootstrapGraphics(w)) ++g_bootstrap.set; return; }
     ((ID3D12GraphicsCommandList*)w->real)->SetPipelineState((ID3D12PipelineState*)Unwrap(p));
 }
 static void __stdcall ListDraw12(Wrap* w, UINT vertices, UINT instances, UINT start, UINT first_instance)
 {
+    if (DrawTraceOn()) DrawTrace(w, "Draw", vertices, instances);
     if (BootstrapNoopEnabled() && IsXboxList(w)) {
         if (!BindBootstrapGraphics(w)) return;
         ++g_bootstrap.draw;
@@ -842,6 +1244,7 @@ static void __stdcall ListDraw12(Wrap* w, UINT vertices, UINT instances, UINT st
 }
 static void __stdcall ListDrawIndexed13(Wrap* w, UINT indices, UINT instances, UINT start, INT base, UINT first_instance)
 {
+    if (DrawTraceOn()) DrawTrace(w, "DrawIndexed", indices, instances);
     if (BootstrapNoopEnabled() && IsXboxList(w)) {
         if (!BindBootstrapGraphics(w)) return;
         ++g_bootstrap.draw;
@@ -850,6 +1253,7 @@ static void __stdcall ListDrawIndexed13(Wrap* w, UINT indices, UINT instances, U
 }
 static void __stdcall ListDispatch14(Wrap* w, UINT x, UINT y, UINT z)
 {
+    if (DrawTraceOn()) DrawTrace(w, "Dispatch", x, y);
     if (BootstrapNoopEnabled() && IsXboxList(w)) {
         if (!BindBootstrapCompute(w)) return;
         ++g_bootstrap.dispatch;
@@ -884,8 +1288,15 @@ static void __stdcall ListBarriers26(Wrap* w, UINT count, const D3D12_RESOURCE_B
     if (BootstrapNoopEnabled()) ++g_bootstrap.barriers;
     std::vector<D3D12_RESOURCE_BARRIER> b(barriers, barriers + count);
     for (auto& x : b) {
-        if (x.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION) x.Transition.pResource = (ID3D12Resource*)Unwrap(x.Transition.pResource);
-        else if (x.Type == D3D12_RESOURCE_BARRIER_TYPE_ALIASING) { x.Aliasing.pResourceBefore = (ID3D12Resource*)Unwrap(x.Aliasing.pResourceBefore); x.Aliasing.pResourceAfter = (ID3D12Resource*)Unwrap(x.Aliasing.pResourceAfter); }
+        if (x.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION) {
+            InvalidatePresentState(x.Transition.pResource);
+            x.Transition.pResource = (ID3D12Resource*)Unwrap(x.Transition.pResource);
+        } else if (x.Type == D3D12_RESOURCE_BARRIER_TYPE_ALIASING) {
+            InvalidatePresentState(x.Aliasing.pResourceBefore);
+            InvalidatePresentState(x.Aliasing.pResourceAfter);
+            x.Aliasing.pResourceBefore = (ID3D12Resource*)Unwrap(x.Aliasing.pResourceBefore);
+            x.Aliasing.pResourceAfter = (ID3D12Resource*)Unwrap(x.Aliasing.pResourceAfter);
+        }
         else if (x.Type == D3D12_RESOURCE_BARRIER_TYPE_UAV) x.UAV.pResource = (ID3D12Resource*)Unwrap(x.UAV.pResource);
     }
     ((ID3D12GraphicsCommandList*)w->real)->ResourceBarrier(count, b.data());
@@ -937,12 +1348,66 @@ static void __stdcall ListSlot40(Wrap* w, UINT index, uintptr_t argument, const 
         list->SetGraphicsRoot32BitConstants(index, (UINT)argument, data, offset);
     } else list->SetGraphicsRootShaderResourceView(index, argument);
 }
-static HRESULT __stdcall List_Reset(Wrap* w, ID3D12CommandAllocator* a, ID3D12PipelineState* p) { return ((ID3D12GraphicsCommandList*)w->real)->Reset((ID3D12CommandAllocator*)Unwrap(a), (ID3D12PipelineState*)Unwrap(p)); }
+// ---- Xbox-расширения списка команд (раскладка GTA VI = «новая» раскладка VIctory; слот s>=59 → база s-2) ----
+// 70/75/126/142 — состояние, не имеющее PC-аналога (depth bounds, PS depth order, shading rate, неизвестное): игнорируются.
+// 74 — 64-битное ожидание значения в памяти: списки у нас выполняются до конца, ждать нечего.
+// 131/132 — sync top/bottom-of-pipe: порядок обеспечивает хост-список. 146 — группы барьеров: один UAV-барьер на всё (как у VIctory).
+// 148 — AllocateUploadMemory(size, alignment) -> указатель на обнулённую память, принадлежащую списку, освобождается при Reset.
+static void __stdcall ListIgnored(Wrap*) {}
+static void __stdcall ListWait74(Wrap*, UINT64, UINT, UINT64) {}
+static void __stdcall ListSync(Wrap*, UINT, UINT, UINT64, UINT64) {}
+static void __stdcall ListBarrierGroups146(Wrap* w, UINT count, const void* /*groups*/)
+{
+    if (!count) return;
+    D3D12_RESOURCE_BARRIER b = {}; b.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV; b.UAV.pResource = nullptr;
+    ((ID3D12GraphicsCommandList*)w->real)->ResourceBarrier(1, &b);
+}
+static std::map<Wrap*, std::vector<void*>> g_upload; static SRWLOCK g_uploadLock = SRWLOCK_INIT;
+static void FreeUploadFor(Wrap* w)
+{
+    std::vector<void*> v; { ExclusiveSrwLock g(g_uploadLock); auto it = g_upload.find(w); if (it == g_upload.end()) return; v.swap(it->second); g_upload.erase(it); }
+    for (void* p : v) _aligned_free(p);
+}
+static void* __stdcall ListAllocateUpload148(Wrap* w, UINT64 size, UINT64 alignment)
+{
+    if (alignment < 16) alignment = 16;
+    if (alignment & (alignment - 1)) { XS_LOG("list slot148 AllocateUpload: alignment %#llx не степень двойки -> NULL", (unsigned long long)alignment); return nullptr; }
+    void* p = _aligned_malloc((size_t)(size ? size : 1), (size_t)alignment); if (!p) return nullptr;
+    memset(p, 0, (size_t)size);
+    { ExclusiveSrwLock g(g_uploadLock); g_upload[w].push_back(p); }
+    static std::atomic<int> n{0}; if (++n <= 6) XS_LOG("list slot148 AllocateUpload size=%#llx align=%#llx -> %p", (unsigned long long)size, (unsigned long long)alignment, p);
+    return p;
+}
+static HRESULT __stdcall List_Reset(Wrap* w, ID3D12CommandAllocator* a, ID3D12PipelineState* p)
+{
+    FreeUploadFor(w);
+    const HRESULT hr = ((ID3D12GraphicsCommandList*)w->real)->Reset((ID3D12CommandAllocator*)Unwrap(a), (ID3D12PipelineState*)Unwrap(p));
+    if (SUCCEEDED(hr)) DiscardListWrites(w);
+    return hr;
+}
+// Game+0x2474cce calls list+0x458 with a device9-created allocator in RDX,
+// R8=0 and R9=0, then checks HRESULT. The missing reset left PC lists closed:
+// subsequent Close calls returned E_FAIL. Only the observed zero extension
+// word is supported; its full Xbox meaning is not yet established.
+static HRESULT __stdcall List_ResetX139(Wrap* w, ID3D12CommandAllocator* allocator,
+    ID3D12PipelineState* initialState, UINT64 extension)
+{
+    if (extension) {
+        XS_LOG("list slot139 ResetX unsupported extension=%#llx", (unsigned long long)extension);
+        return E_NOTIMPL;
+    }
+    const HRESULT hr = List_Reset(w, allocator, initialState);
+    static std::atomic<unsigned> calls{0};
+    const unsigned n = ++calls;
+    if (n <= 8 || FAILED(hr)) XS_LOG("list slot139 ResetX allocator=%p initial=%p -> PC Reset hr=0x%08lX", (void*)allocator, (void*)initialState, (unsigned long)hr);
+    return hr;
+}
 static uint64_t __stdcall Heap_GetCPUStart(Wrap* w) { if (w->pad[1]) return w->pad[1]; D3D12_CPU_DESCRIPTOR_HANDLE h = {}; ((void* (*)(void*, void*))(*(void***)w->real)[9])(w->real, &h); return h.ptr; }
 static uint64_t __stdcall Heap_GetGPUStart(Wrap* w) { D3D12_GPU_DESCRIPTOR_HANDLE h = {}; ((void* (*)(void*, void*))(*(void***)w->real)[10])(w->real, &h); return h.ptr; }
 // Слот 9 allocator'а (Xbox): наблюдался вызов (this, fn, ctx) из 0x1401884fe — регистрация колбэка; пока лог + S_OK.
 static HRESULT __stdcall Alloc_Slot9(Wrap*, uintptr_t fn, uintptr_t ctx) { static std::atomic<int> n{0}; if (n++ < 4) XS_LOG("allocator slot9 (callback?) fn=%p ctx=%p -> S_OK", (void*)fn, (void*)ctx); return S_OK; }
 static HRESULT __stdcall Queue_ExecuteX35(Wrap* w, UINT n, ID3D12CommandList* const* lists, uint64_t x, uint64_t y);
+static void InstallObjectReturnTrace();
 static void InitObjVts()
 {
     static SRWLOCK lock = SRWLOCK_INIT;
@@ -961,7 +1426,7 @@ static void InitObjVts()
     for (int i = 0; i < 9; i++) g_vtAlloc[i] = (void*)fw[i]; g_vtAlloc[0] = (void*)Obj_QI; g_vtAlloc[7] = (void*)Obj_GetDevice; g_vtAlloc[9] = (void*)Alloc_Slot9;   // ID3D12CommandAllocator: 0..8; слот 9 — Xbox-расширение
     for (int i = 0; i < 9; i++) g_vtPso[i] = (void*)fw[i]; g_vtPso[0] = (void*)Obj_QI; g_vtPso[7] = (void*)Obj_GetDevice;   // ID3D12PipelineState: 0..8; слоты >=9 — Xbox-расширения (лог)
     for (int i = 0; i < 15; ++i) g_vtRes[i] = (void*)fw[i];          // ID3D12Resource: 0..14
-    g_vtRes[0] = (void*)Obj_QI; g_vtRes[7] = (void*)Obj_GetDevice; g_vtRes[11] = (void*)Res_GetGPUVirtualAddress;
+    g_vtRes[0] = (void*)Obj_QI; g_vtRes[2] = (void*)Res_Release; g_vtRes[7] = (void*)Obj_GetDevice; g_vtRes[8] = (void*)Res_Map; g_vtRes[9] = (void*)Res_Unmap; g_vtRes[11] = (void*)Res_GetGPUVirtualAddress;
     for (int i = 0; i < 12; ++i) g_vtFence[i] = (void*)fw[i];
     g_vtFence[0] = (void*)FenceQI; g_vtFence[1] = (void*)FenceAddRef; g_vtFence[2] = (void*)FenceRelease;
     g_vtFence[7] = (void*)Obj_GetDevice; g_vtFence[8] = (void*)FenceCompleted8;
@@ -969,6 +1434,11 @@ static void InitObjVts()
     void** vts[3] = { g_vtQueue, g_vtList, g_vtHeap };
     for (void** vt : vts) { vt[0] = (void*)Obj_QI; vt[7] = (void*)Obj_GetDevice; }
     g_vtQueue[10] = (void*)Queue_ExecuteCommandLists; g_vtQueue[18] = (void*)Queue_TimestampFrequency18; g_vtQueue[35] = (void*)Queue_ExecuteX35; g_vtList[28] = (void*)List_SetDescriptorHeaps; g_vtList[25] = (void*)List_SetPipelineState; g_vtList[10] = (void*)List_Reset;
+    g_vtList[139] = (void*)List_ResetX139;
+    g_vtList[71] = (void*)ListWrite32_71; g_vtList[72] = (void*)ListWrite64_72;
+    for (int i : {70, 75, 126, 142}) g_vtList[i] = (void*)ListIgnored;
+    g_vtList[74] = (void*)ListWait74; g_vtList[131] = (void*)ListSync; g_vtList[132] = (void*)ListSync;
+    g_vtList[146] = (void*)ListBarrierGroups146; g_vtList[148] = (void*)ListAllocateUpload148;
     g_vtQueue[14] = (void*)QueueSignal14; g_vtQueue[15] = (void*)QueueWait15;
     g_vtQueue[16] = (void*)QueueSlot16;
     g_vtQueue[32] = (void*)QueuePresent32;
@@ -982,7 +1452,58 @@ static void InitObjVts()
     g_vtList[36] = (void*)ListSlot36; g_vtList[40] = (void*)ListSlot40;
     g_vtHeap[9] = (void*)Heap_GetCPUStart; g_vtHeap[10] = (void*)Heap_GetGPUStart;
     g_vtList[46] = (void*)List_OMSetRenderTargets; g_vtList[47] = (void*)ListSlot47; g_vtList[48] = (void*)ListSlot48; g_vtList[49] = (void*)List_ClearUAVUint; g_vtList[50] = (void*)List_ClearUAVFloat;
+    if (RootTraceOn() || DrawTraceOn()) {
+        g_originalRootSlots[29] = g_vtList[29]; g_vtList[29] = (void*)&TraceFwdSlot<29>; g_originalRootSlots[30] = g_vtList[30]; g_vtList[30] = (void*)&TraceFwdSlot<30>;
+        g_originalRootSlots[31] = g_vtList[31]; g_vtList[31] = (void*)&TraceFwdSlot<31>; g_originalRootSlots[32] = g_vtList[32]; g_vtList[32] = (void*)&TraceFwdSlot<32>;
+    }
     InstallBootstrapRootSlots(std::make_integer_sequence<int, 14>{}); // Xbox root33..46, PC contracts retained.
+    InstallObjectReturnTrace();
+}
+
+// These are explicit contracts, not guesses from return-register bits. In
+// particular, zero refcounts/void returns are not failed HRESULTs.
+template<int Kind> static void TraceObjectBase(void** vt)
+{
+    using namespace xsx::returns;
+    Install<Kind, 0>(vt, &Obj_QI, "QueryInterface");
+    InstallMember<Kind, 1, Wrap>(vt, &IUnknown::AddRef, "AddRef", Contract::ReferenceCount);
+    InstallMember<Kind, 2, Wrap>(vt, &IUnknown::Release, "Release", Contract::ReferenceCount);
+    InstallMember<Kind, 3, Wrap>(vt, &ID3D12Object::GetPrivateData, "GetPrivateData");
+    InstallMember<Kind, 4, Wrap>(vt, &ID3D12Object::SetPrivateData, "SetPrivateData");
+    InstallMember<Kind, 5, Wrap>(vt, &ID3D12Object::SetPrivateDataInterface, "SetPrivateDataInterface");
+    InstallMember<Kind, 6, Wrap>(vt, &ID3D12Object::SetName, "SetName");
+    if constexpr (Kind != 1) Install<Kind, 7>(vt, &Obj_GetDevice, "GetDevice");
+}
+static void InstallObjectReturnTrace()
+{
+    if (!ReturnTraceMode()) return;
+    using namespace xsx::returns;
+    TraceObjectBase<2>(g_vtQueue); TraceObjectBase<3>(g_vtList); TraceObjectBase<4>(g_vtHeap);
+    TraceObjectBase<5>(g_vtPso); TraceObjectBase<6>(g_vtAlloc); TraceObjectBase<7>(g_vtFence); TraceObjectBase<8>(g_vtRes);
+    Install<2, 14>(g_vtQueue, &QueueSignal14, "Signal");
+    Install<2, 15>(g_vtQueue, &QueueWait15, "Wait");
+    Install<2, 16>(g_vtQueue, &QueueSlot16, "XboxSignalOrPCFrequency");
+    InstallMember<2, 17, Wrap>(g_vtQueue, &ID3D12CommandQueue::GetClockCalibration, "GetClockCalibration");
+    Install<2, 18>(g_vtQueue, &Queue_TimestampFrequency18, "GetTimestampFrequency");
+    Install<2, 32>(g_vtQueue, &QueuePresent32, "PresentX");
+    Install<2, 35>(g_vtQueue, &Queue_ExecuteX35, "ExecuteCommandListsX");
+    InstallMember<3, 9, Wrap>(g_vtList, &ID3D12GraphicsCommandList::Close, "Close");
+    Install<3, 10>(g_vtList, &List_Reset, "Reset");
+    Install<3, 139>(g_vtList, &List_ResetX139, "ResetX");
+    Install<4, 9>(g_vtHeap, &Heap_GetCPUStart, "CPUStart", Contract::NonNull);
+    // A non-shader-visible heap legitimately has no GPU handle.
+    Install<4, 10>(g_vtHeap, &Heap_GetGPUStart, "GPUStart", Contract::Value);
+    InstallMember<5, 8, Wrap>(g_vtPso, &ID3D12PipelineState::GetCachedBlob, "GetCachedBlob");
+    InstallMember<6, 8, Wrap>(g_vtAlloc, &ID3D12CommandAllocator::Reset, "Reset");
+    Install<6, 9>(g_vtAlloc, &Alloc_Slot9, "XboxCallback");
+    InstallMember<7, 9, Wrap>(g_vtFence, &ID3D12Fence::SetEventOnCompletion, "SetEventOnCompletion");
+    Install<7, 10>(g_vtFence, &FenceSignal10, "Signal");
+    Install<7, 12>(g_vtFence, &FenceAddress12, "CompletionAddress", Contract::NonNull);
+    InstallMember<8, 8, Wrap>(g_vtRes, &ID3D12Resource::Map, "Map");
+    Install<8, 11>(g_vtRes, &Res_GetGPUVirtualAddress, "GPUVirtualAddress", Contract::NonNull);
+    InstallMember<8, 12, Wrap>(g_vtRes, &ID3D12Resource::WriteToSubresource, "WriteToSubresource");
+    InstallMember<8, 13, Wrap>(g_vtRes, &ID3D12Resource::ReadFromSubresource, "ReadFromSubresource");
+    InstallMember<8, 14, Wrap>(g_vtRes, &ID3D12Resource::GetHeapProperties, "GetHeapProperties");
 }
 // Слот 48 — CreateCommandQueue(xbox_desc*, riid, ppv) [по IID ID3D12CommandQueue в r8; 4 вызова подряд с 4 выходными глобалами].
 // Раскладка Xbox-дескриптора НЕ известна: наблюдалось u32[0..5] = {2,0,k,m,1,0}, k=1,2,3,0; считаем u32[0] = тип очереди (2 = COMPUTE).
@@ -1048,7 +1569,8 @@ static HRESULT __stdcall Dev_CreateDescriptorHeap14(Wrap* w, const D3D12_DESCRIP
         if (!IsBadReadPtr(ext, 16) && ext[0] && !(ext[0] & 0xFFF) && ext[1] == (uint64_t)d->NumDescriptors * inc && g_hrN < 512) {
             guestBase = ext[0]; guestSize = ext[1];
             D3D12_CPU_DESCRIPTOR_HANDLE rs = {}; ((void* (*)(void*, void*))(*(void***)*out)[9])(*out, &rs);
-            int i = g_hrN.load(); g_hr[i] = { guestBase, guestSize, rs.ptr }; g_hrN.store(i + 1, std::memory_order_release);
+            int i = g_hrN.load(); uint64_t gpu = 0; if (d->Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) { D3D12_GPU_DESCRIPTOR_HANDLE gh = {}; ((void* (*)(void*, void*))(*(void***)*out)[10])(*out, &gh); gpu = gh.ptr; }
+            g_hr[i] = { guestBase, guestSize, rs.ptr, gpu }; g_hrN.store(i + 1, std::memory_order_release);
         }
         hr = WrapOutput(hr, out, g_vtHeap, 4);
         if (SUCCEEDED(hr)) ((Wrap*)*out)->pad[1] = guestBase;
@@ -1075,6 +1597,21 @@ template <int... I> static void FillTrace(std::integer_sequence<int, I...>) { ((
 // PC-аналог: ID3D12Device3::OpenExistingHeapFromAddress (слот 48) + CreatePlacedResource. Если не вышло — committed-буфер (БЕЗ привязки к памяти игры; логируется).
 struct PlacedRes { uint64_t addr, size; void* res; };
 static PlacedRes g_placed[256]; static std::atomic<int> g_placedN{0};
+// Реестр «адрес памяти игры → ресурс» (аналог shadow::find у VIctory): нужен для расшифровки дескрипторов-по-адресу (слоты 70/71) и трансляции GPU-адресов.
+struct AddrRes { uint64_t size; void* res; uint32_t dim, fmt; };
+static std::map<uint64_t, AddrRes> g_addrRes; static SRWLOCK g_addrResLock = SRWLOCK_INIT;
+static void ForgetResourceAddress(Wrap* resource, void* address)
+{
+    ExclusiveSrwLock held(g_addrResLock);
+    auto it = g_addrRes.find((uint64_t)address);
+    if (it != g_addrRes.end() && it->second.res == resource) g_addrRes.erase(it);
+}
+static const AddrRes* FindAddrRes(uint64_t a, uint64_t* base = nullptr)
+{
+    auto it = g_addrRes.upper_bound(a); if (it == g_addrRes.begin()) return nullptr; --it;
+    if (a >= it->first && a < it->first + (it->second.size ? it->second.size : 1)) { if (base) *base = it->first; return &it->second; }
+    return nullptr;
+}
 static HRESULT __stdcall Dev_CreatePlacedResourceX133(Wrap* w, void* addr, const D3D12_RESOURCE_DESC* desc, UINT state, const D3D12_CLEAR_VALUE* cv, REFIID riid, void** out)
 {
     ID3D12Device* real = (ID3D12Device*)w->real; D3D12_RESOURCE_DESC dd = PcResourceDesc(*desc);
@@ -1098,45 +1635,195 @@ static HRESULT __stdcall Dev_CreatePlacedResourceX133(Wrap* w, void* addr, const
     if (SUCCEEDED(hr) && out && *out && g_placedN < 256) { int i = g_placedN.load(); g_placed[i] = { (uint64_t)addr, dd.Width, *out }; g_placedN.store(i + 1); }
     if (SUCCEEDED(hr) && out && *out && IsEqualGUID(riid, __uuidof(ID3D12Resource))) {   // как VIctory (Backing::Address): GPU VA ресурса на адресе == адрес памяти игры
         InitObjVts(); hr = WrapOutput(hr, out, g_vtRes, 8);
-        if (SUCCEEDED(hr)) { ExclusiveSrwLock held(g_resLock); g_resShadow[*out] = ResExtra{addr, 0}; }
+        if (SUCCEEDED(hr)) { { ExclusiveSrwLock held(g_resLock); g_resShadow[*out] = ResExtra{addr, 0}; }
+            D3D12_RESOURCE_ALLOCATION_INFO ai = real->GetResourceAllocationInfo(0, 1, &dd); ExclusiveSrwLock h2(g_addrResLock); g_addrRes[(uint64_t)addr] = AddrRes{ ai.SizeInBytes != ~0ull ? ai.SizeInBytes : dd.Width, *out, (uint32_t)dd.Dimension, (uint32_t)dd.Format }; }
     }
     XS_LOG("DEVICE slot133 CreatePlacedResourceX addr=%p dim=%d width=%#llx state=%#x -> %s hr=0x%08lX res=%p", addr, (int)desc->Dimension, (unsigned long long)desc->Width, state, path, (unsigned long)hr, out ? *out : nullptr);
     return hr;
 }
-// Слоты 78/79 — SetFrameIntervalX(output=NULL, interval, frames, flags) / ScheduleFrameEventX(event, ...) [frame pacing Xbox; на PC нет аналога]: S_OK, один раз логируем.
-static HRESULT __stdcall Dev_FramePacing(Wrap* w, uintptr_t a, uintptr_t b, uintptr_t c)
+struct FrameHostClock {
+    uint64_t NowNs() const {
+        return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+    void SleepUntilNs(uint64_t deadline) const {
+        const auto at = std::chrono::steady_clock::time_point(
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::nanoseconds(deadline)));
+        std::this_thread::sleep_until(at);
+    }
+};
+static xsx::frame::Timeline g_frameClock;
+static FrameHostClock g_frameHostClock;
+static void FrameClockSnapshot()
 {
-    static std::atomic<int> n{0}; if (n++ < 6) XS_LOG("DEVICE slot78/79 frame pacing (SetFrameIntervalX/ScheduleFrameEventX) a=%p b=%p c=%p -> S_OK (no-op)", (void*)a, (void*)b, (void*)c);
+    xsx::frame::State state;
+    // Fault observation must not wait for a lock held by a faulting thread.
+    if (!g_frameClock.TrySnapshot(state)) { XS_LOG("FRAME CLOCK snapshot busy"); return; }
+    XS_LOG("FRAME CLOCK interval_us=%u period=%u origin_tokens=%llu reserved_ticks=%llu,%llu,%llu (CPU clock, no scanout statistics)",
+        state.interval_us, state.period, (unsigned long long)state.frames,
+        (unsigned long long)state.reserved[0], (unsigned long long)state.reserved[1], (unsigned long long)state.reserved[2]);
+}
+// Local+0x247abd8 and the public GDK FramePacing sample: output, us, depth,
+// flags. Preserve this signature separately from ScheduleFrameEventX.
+static HRESULT __stdcall Dev_SetFrameInterval78(Wrap*, void* output, UINT intervalUs, UINT period, UINT flags)
+{
+    if (output || flags) return E_NOTIMPL; // Only the observed default-output form.
+    g_frameClock.SetInterval(g_frameHostClock.NowNs(), intervalUs, period);
+    static std::atomic<unsigned> calls{0};
+    const unsigned call = ++calls;
+    if (call <= 8 || !(call % 256)) XS_LOG("DEVICE slot78 SetFrameIntervalX interval_us=%u period=%u flags=%#x -> S_OK", intervalUs, period, flags);
+    return S_OK;
+}
+static HRESULT __stdcall Dev_ScheduleFrameEvent79(Wrap*, UINT kind, UINT offsetUs, const void* list, UINT flags)
+{
+    if (kind > 2) return E_INVALIDARG;
+    // Observed game events use zero offset and no GPU command list. Do not
+    // claim GPU-triggered scheduling or offsets we do not implement.
+    if (offsetUs || list || flags) return E_NOTIMPL;
+    static std::atomic<unsigned> calls{0};
+    if (calls++ < 8) XS_LOG("DEVICE slot79 ScheduleFrameEventX kind=%u offset_us=0 -> S_OK (CPU clock)", kind);
     return S_OK;
 }
 
-// Слот 127 (+0x3f8): «тяжёлая» Xbox-аллокация runtime (вызывается 2 раза в функции 0x14247ad10 между push/pop хука пула).
-// Игра ставит через `__XMemAllocationHooks__` (экспорт exe; hooks[0]=Alloc(size, attrs)) хук категории 0x80 (атрибуты биты 16..23) с пулом 64/82 МБ и в конце проверяет,
-// что runtime израсходовал пул почти целиком (остаток <= 0x1fffff, иначе int3 @0x247af2d). Настоящего Xbox-runtime у нас нет → «потребляем» пул сами:
-// первым вызовом забираем (остаток - 1 МиБ) через хук. Смещения — RVA этой сборки exe (stack хуков 0x6843770, база пула 0x75e6ff0); при несовпадении структуры — пропуск.
-static HRESULT __stdcall Dev_Slot127(Wrap* w, uintptr_t a, uintptr_t b, uintptr_t c)
+// Game+0x193e1b4: heap, flags=ALLOW_DISPLAY, desc1, layout, clear,
+// protected session, castable count/formats, IID_ID3D12Resource, out.
+// The eleventh argument is pre-call rsp+0x50. Match that ABI, not a guessed
+// three-argument allocation method. No title offsets or budget padding.
+static HRESULT __stdcall Dev_CreateCommittedResource127(Wrap* w,
+    const D3D12_HEAP_PROPERTIES* heap, D3D12_HEAP_FLAGS flags,
+    const D3D12_RESOURCE_DESC1* desc, D3D12_BARRIER_LAYOUT layout,
+    const D3D12_CLEAR_VALUE* clear, ID3D12ProtectedResourceSession* protectedSession,
+    UINT castableCount, const DXGI_FORMAT* castableFormats, REFIID iid, void** out)
 {
-    static std::atomic<int> n{0}; int k = n++;
-    char* base = (char*)GetModuleHandleW(nullptr);
-    typedef void* (*AllocHook)(size_t, uint64_t);
-    auto hooks = (void**)GetProcAddress((HMODULE)base, "__XMemAllocationHooks__");
-    uint64_t* top = (uint64_t*)(base + 0x6843770);                       // вершина стека хуков категории 0x80: {fn, userdata, ctx, next}
-    uint64_t* poolBase = (uint64_t*)(base + 0x75e6ff0);
-    if (hooks && !IsBadReadPtr(top, 8) && *top && !IsBadReadPtr((void*)*top, 32)) {
-        uint64_t* ent = (uint64_t*)*top; uint64_t* ud = (uint64_t*)ent[1];
-        if (ud && !IsBadReadPtr(ud, 16)) {
-            if (!*poolBase) { ((AllocHook)hooks[0])(0x10000, 0x00808000); }              // первый вызов инициализирует пул
-            uint64_t cursor = ud[0], size = ud[1], pb = *poolBase;
-            if (pb && cursor >= pb && size) {
-                uint64_t remaining = pb + size - cursor; uint64_t take = remaining > (1u << 20) ? ((remaining - (1u << 20)) & ~0xFFFFull) : 0;
-                void* p = take ? ((AllocHook)hooks[0])((size_t)take, 0x00808000) : nullptr;
-                XS_LOG("DEVICE slot127 call#%d: пул хука 0x80: base=%#llx size=%#llx cursor=%#llx remaining=%#llx -> взято %#llx (%p)", k, (unsigned long long)pb, (unsigned long long)size, (unsigned long long)cursor, (unsigned long long)remaining, (unsigned long long)take, p);
-                return S_OK;
-            }
+    if (out) *out = nullptr;
+    D3D12_RESOURCE_ALLOCATION_INFO info{};
+    D3D12_RESOURCE_ALLOCATION_INFO hostInfo{};
+    bool guestLayout = false;
+    ResExtra extra{};
+    const HRESULT hr = [&]() -> HRESULT {
+        if (!heap || !desc) return E_INVALIDARG;
+        if (!IsEqualGUID(iid, __uuidof(ID3D12Resource))) return E_NOINTERFACE;
+        // Only the observed unprotected, non-castable form is implemented.
+        if (protectedSession || castableCount || castableFormats) return E_NOTIMPL;
+        if (desc->Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D &&
+            desc->Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) return E_NOTIMPL;
+        if (desc->Dimension == D3D12_RESOURCE_DIMENSION_BUFFER &&
+            (layout != D3D12_BARRIER_LAYOUT_UNDEFINED || !desc->Width)) return E_INVALIDARG;
+        D3D12_RESOURCE_DESC base{};
+        std::memcpy(&base, desc, sizeof base);
+        base = PcResourceDesc(base);
+        D3D12_RESOURCE_DESC1 pc = *desc;
+        pc.Format = base.Format; pc.Flags = base.Flags; pc.Layout = base.Layout;
+        // DESC1's mip region starts in DESC's tail padding: do not memcpy a
+        // whole DESC over it. Preserve sampler-feedback fields for the backend.
+        D3D12_CLEAR_VALUE converted{};
+        if (clear) { converted = *clear; converted.Format = XboxFormatToPc(clear->Format); clear = &converted; }
+        ID3D12Device10* native = nullptr;
+        HRESULT result = ((IUnknown*)w->real)->QueryInterface(__uuidof(ID3D12Device10), (void**)&native);
+        if (FAILED(result)) return result;
+        ID3D12Resource* resource = nullptr;
+        result = native->CreateCommittedResource3(heap, flags, &pc, layout, clear,
+            nullptr, 0, nullptr, iid, out ? (void**)&resource : nullptr);
+        if (SUCCEEDED(result) && resource) info = native->GetResourceAllocationInfo2(0, 1, &pc, nullptr);
+        native->Release();
+        if (FAILED(result) || !out) return result; // Validation-only S_FALSE: no allocation.
+        if (!resource) return E_FAIL;
+        hostInfo = info;
+        if (desc->Dimension == D3D12_RESOURCE_DIMENSION_BUFFER) {
+            // Standard PC buffer semantics, as in the existing committed76
+            // path: native Map and native GPU VA. There is no unused CPU
+            // shadow/title allocation and no claim of console UMA coherence.
+            // Buffer InitialLayout must be UNDEFINED; let the backend validate
+            // it, heap properties, clear value, flags and all DESC1 fields.
+            InitObjVts();
+            void* output = resource;
+            const HRESULT wrapped = WrapOutput(result, &output, g_vtRes, 8);
+            if (SUCCEEDED(wrapped)) *out = output;
+            return wrapped;
         }
-    }
-    XS_LOG("DEVICE slot127 call#%d: хук пула не найден/не инициализирован (hooks=%p top=%p) -> S_OK без потребления", k, (void*)hooks, (void*)top);
-    return S_OK;
+        // CPU memory belongs to the console layout, not Vulkan's private
+        // image metadata. Retain native sizing only for unimplemented layouts.
+        D3D12_RESOURCE_DESC guest{}; std::memcpy(&guest, desc, sizeof guest);
+        guestLayout = GuestColorFootprint(guest, info);
+        if (!info.SizeInBytes || info.SizeInBytes == ~0ull || !info.Alignment ||
+            (info.Alignment & (info.Alignment - 1)) || info.Alignment > (1ull << 28) ||
+            info.SizeInBytes > SIZE_MAX - info.Alignment) {
+            resource->Release(); return E_INVALIDARG;
+        }
+        extra.size = (size_t)info.SizeInBytes;
+        // Only these initial legacy states are known. Recording a title
+        // transition invalidates this knowledge; it does not prove execution.
+        switch (layout) {
+        case D3D12_BARRIER_LAYOUT_COMMON:
+            extra.presentState = D3D12_RESOURCE_STATE_COMMON; extra.presentStateKnown = true; break;
+        case D3D12_BARRIER_LAYOUT_RENDER_TARGET:
+            extra.presentState = D3D12_RESOURCE_STATE_RENDER_TARGET; extra.presentStateKnown = true; break;
+        case D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS:
+            extra.presentState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS; extra.presentStateKnown = true; break;
+        default: break;
+        }
+        auto hooks = (void**)GetProcAddress(GetModuleHandleW(nullptr), "__XMemAllocationHooks__");
+        if (hooks) {
+            if (!hooks[0] || !hooks[1]) { resource->Release(); return E_NOTIMPL; }
+            unsigned lg = 0;
+            for (uint64_t alignment = info.Alignment; alignment > 1; alignment >>= 1) ++lg;
+            // Page class is independent of alignment. In particular, a 4MiB
+            // resource may require 64KiB alignment, not 2MiB alignment.
+            const uint64_t pages = info.SizeInBytes >= (2ull << 20) ? 2 : 1;
+            extra.attributes = (128ull << 16) | (pages << 14) | ((uint64_t)lg << 24) |
+                ((heap->Type == D3D12_HEAP_TYPE_DEFAULT ? 1ull : 3ull) << 29);
+            extra.freeHook = (ResourceFreeHook)hooks[1];
+            extra.shadow = ((void* (__stdcall*)(size_t, uint64_t))hooks[0])(extra.size, extra.attributes);
+            extra.ownedBase = extra.shadow;
+            // A title allocator failure must not escape its budget through a
+            // fallback VirtualAlloc. The same hook and attributes free it.
+        } else {
+            extra.ownedBase = VirtualAlloc(nullptr, extra.size + (size_t)info.Alignment - 1,
+                MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+            if (extra.ownedBase) extra.shadow = (void*)(((uintptr_t)extra.ownedBase + info.Alignment - 1) & ~(info.Alignment - 1));
+        }
+        if (!extra.shadow) { resource->Release(); return E_OUTOFMEMORY; }
+        if ((uintptr_t)extra.shadow & (info.Alignment - 1)) {
+            XS_LOG("RESOURCE127 allocator alignment failure address=%p required=%#llx attributes=%#llx",
+                extra.shadow, (unsigned long long)info.Alignment, (unsigned long long)extra.attributes);
+            FreeOwnedShadow(extra); resource->Release(); return E_INVALIDARG;
+        }
+        std::memset(extra.shadow, 0, extra.size);
+        InitObjVts();
+        auto* wrapped = NewWrap(g_vtRes, resource, 8);
+        if (!wrapped) { FreeOwnedShadow(extra); resource->Release(); return E_OUTOFMEMORY; }
+        try {
+            {
+                ExclusiveSrwLock held(g_resLock);
+                g_resShadow[wrapped] = extra;
+            }
+            {
+                ExclusiveSrwLock held(g_addrResLock);
+                g_addrRes[(uint64_t)extra.shadow] = AddrRes{info.SizeInBytes, wrapped, (uint32_t)base.Dimension, (uint32_t)base.Format};
+            }
+        } catch (const std::bad_alloc&) {
+            { ExclusiveSrwLock held(g_resLock); g_resShadow.erase(wrapped); }
+            FreeOwnedShadow(extra); resource->Release(); return E_OUTOFMEMORY;
+        }
+        *out = wrapped;
+        return S_OK;
+    }();
+    CALLER(caller);
+    const bool buffer = desc && desc->Dimension == D3D12_RESOURCE_DIMENSION_BUFFER;
+    XS_LOG("DEVICE slot127 CreateCommittedResource3 %llux%u fmt=%d heap_flags=%#x layout=%#x desc_layout=%#x guest_bytes=%#llx host_bytes=%#llx align=%#llx sizing=%s -> hr=0x%08lX res=%p native=%p CPU=%p owner=%s caller=%s",
+        desc ? (unsigned long long)desc->Width : 0, desc ? desc->Height : 0, desc ? (int)desc->Format : 0,
+        (unsigned)flags, (unsigned)layout, desc ? (unsigned)desc->Layout : 0,
+        (unsigned long long)(buffer ? 0 : info.SizeInBytes), (unsigned long long)hostInfo.SizeInBytes,
+        (unsigned long long)(buffer ? hostInfo.Alignment : info.Alignment),
+        buffer ? "native-buffer" : guestLayout ? "GFX10-color64K" : "native-fallback",
+        (unsigned long)hr, out ? *out : nullptr, out && *out ? Unwrap(*out) : nullptr, SUCCEEDED(hr) ? extra.shadow : nullptr,
+        buffer ? "native-buffer" : extra.freeHook ? "title" : "VirtualAlloc", caller);
+    if (buffer) XS_LOG("BUFFER127 heap_type=%u cpu_pages=%u pool=%u flags=%#x native_GPU_VA=%#llx hr=0x%08lX (native Map/VA; no guest UMA bridge)",
+        heap ? (unsigned)heap->Type : 0, heap ? (unsigned)heap->CPUPageProperty : 0,
+        heap ? (unsigned)heap->MemoryPoolPreference : 0, (unsigned)desc->Flags,
+        (unsigned long long)(SUCCEEDED(hr) && out && *out ? ((ID3D12Resource*)Unwrap(*out))->GetGPUVirtualAddress() : 0),
+        (unsigned long)hr);
+    return hr;
 }
 
 // Нативные (ISA) pipeline state: слот 62 (+0x1f0) — из XboxBvhBuilder.dll (this, desc*, 0, 0, riid=ID3D12PipelineState, ppv); слот 67 (+0x218) — из FFX (this, desc*, riid, ppv).
@@ -1149,7 +1836,45 @@ static void LogNativePso(const char* who, int slot, const void* desc)
     XS_LOG("DEVICE slot%d NATIVE PSO (%s) desc=%p [%s] (native translation unavailable)", slot, who, desc, buf);
 }
 #include "native_pso_capture.h"
-
+// ---- Инвентарь нативных PSO (XSX_PSO_INVENTORY=1): ищет в первых 256 байтах описания пары (указатель, размер), на которые указывают
+// блоки метаданных шейдера (заголовок {2, size-12}, 128-битный хеш программы перед 12 нулевыми байтами), и пишет хеши в лог. Описание НЕ расшифровано.
+static thread_local std::vector<std::string> g_lastPsoBlobs;
+static std::map<void*, std::vector<std::string>> g_psoBlobs;
+static std::string InventoryPso(int slot, const void* desc)
+{
+    std::string hs;
+    static bool on = EnvOn("XSX_PSO_INVENTORY") || EnvOn("XSX_DRAW_TRACE"); if (!on || !desc) return hs;
+    static std::atomic<unsigned> seq{0}; const unsigned n = seq++;
+    uint64_t w[32] = {}; if (!ReadPsoMemory(desc, w, sizeof w)) { XS_LOG("PSOINV slot%d #%u: описание нечитаемо", slot, n); return hs; }
+    char line[1200]; int o = snprintf(line, sizeof line, "PSOINV slot%d #%u", slot, n);
+    for (int i = 0; i < 32; i++) {
+        const uint64_t ptr = w[i]; if (ptr < 0x10000 || (ptr >> 47)) continue;
+        for (int d = -1; d <= 1; d += 2) {
+            const int j = i + d; if (j < 0 || j >= 32) continue; const uint64_t sz = w[j];
+            if (sz < 28 || sz > 4096) continue;
+            uint8_t blob[4096]; if (!ReadPsoMemory((void*)ptr, blob, (size_t)sz)) continue;
+            uint32_t h0 = *(uint32_t*)blob, h1 = *(uint32_t*)(blob + 4); static const uint8_t zero12[12] = {};
+            if (h0 != 2 || h1 != sz - 12 || memcmp(blob + sz - 12, zero12, 12)) continue;
+            o += snprintf(line + o, sizeof line - o, " [q%d sz=%#llx hash=", i, (unsigned long long)sz);
+            char hx[40]; for (int k = 0; k < 16; k++) snprintf(hx + k * 2, 3, "%02x", blob[sz - 28 + k]);
+            o += snprintf(line + o, sizeof line - o, "%s]", hx); hs += hx; hs += ' '; break;
+        }
+    }
+    g_lastPsoBlobs.clear();
+    for (int i = 0; i < 32; i++) {
+        const uint64_t ptr = w[i]; if (ptr < 0x10000 || (ptr >> 47)) continue;
+        for (int d = -1; d <= 1; d += 2) {
+            const int j = i + d; if (j < 0 || j >= 32) continue; const uint64_t sz = w[j]; if (sz < 16 || sz > 4096) continue;
+            uint8_t blob[4096]; if (!ReadPsoMemory((void*)ptr, blob, (size_t)sz)) continue;
+            const uint32_t magic = *(uint32_t*)blob;
+            (void)magic; { char tag[32]; snprintf(tag, sizeof tag, "q%d:", i); g_lastPsoBlobs.push_back(std::string(tag) + std::string((char*)blob, (size_t)sz)); break; }
+        }
+    }
+    { static bool verbose = EnvOn("XSX_PSO_INVENTORY"); if (verbose) XS_LOG("%s", line); }
+    return hs;
+}
+static std::map<void*, std::string> g_psoHashes; static SRWLOCK g_psoHashLock = SRWLOCK_INIT;
+static std::set<std::string> g_usedPso;
 // Game RVA0x2477578: (this, desc, IID_ID3D12PipelineState, out).
 // The following code tests HRESULT and packs *out >> 1 into the PSO cache.
 // Returning S_OK without writing *out cached exe+0x6993a4, then faulted on
@@ -1161,8 +1886,8 @@ static HRESULT __stdcall Dev_NativePso57(Wrap* w, const void* desc, REFIID iid, 
     *out = nullptr;
     if (!desc) return E_INVALIDARG;
     if (!IsEqualGUID(iid, __uuidof(ID3D12PipelineState))) return E_NOINTERFACE;
-    CapturePso57(desc, iid, __builtin_return_address(0));
-    if (BootstrapNoopEnabled()) return BootstrapGraphicsOutput(w, iid, out);
+    CapturePso57(desc, iid, __builtin_return_address(0)); std::string hashes = InventoryPso(57, desc);
+    if (BootstrapNoopEnabled()) { HRESULT hr = BootstrapGraphicsOutput(w, iid, out); if (SUCCEEDED(hr) && *out && !hashes.empty()) { ExclusiveSrwLock g(g_psoHashLock); g_psoHashes[*out] = hashes; g_psoBlobs[*out] = g_lastPsoBlobs; } return hr; }
     static std::atomic<unsigned> calls{0};
     const unsigned n = ++calls;
     if (n <= 8 || !(n % 1000))
@@ -1221,7 +1946,7 @@ static HRESULT __stdcall Dev_NativePso62(Wrap* w, const void* desc, uintptr_t, u
 {
     if (!ppv) return E_POINTER;
     *ppv = nullptr;
-    LogNativePso("BVH-builder-style", 62, desc);
+    LogNativePso("BVH-builder-style", 62, desc); InventoryPso(62, desc);
     ID3D12PipelineState* st = GetStubComputePso((ID3D12Device*)w->real);
     if (st) { HRESULT hr = st->QueryInterface(riid, ppv); InitObjVts(); hr = WrapOutput(hr, ppv, g_vtPso, 5);
         XS_LOG("DEVICE slot62 -> ЗАГЛУШКА: пустой compute-PSO %p (BVH не функционален) hr=0x%08lX", (void*)st, (unsigned long)hr); return hr; }
@@ -1229,7 +1954,7 @@ static HRESULT __stdcall Dev_NativePso62(Wrap* w, const void* desc, uintptr_t, u
 }
 static HRESULT __stdcall Dev_NativePso67(Wrap* w, const void* desc, REFIID iid, void** ppv)
 {
-    LogNativePso("FFX-style", 67, desc);
+    LogNativePso("FFX-style", 67, desc); InventoryPso(67, desc);
     if (!ppv) return E_POINTER;
     *ppv = nullptr;
     if (BootstrapNoopEnabled()) {
@@ -1264,7 +1989,7 @@ static HRESULT __stdcall Dev_NativePso86(Wrap* w, const void* desc, REFIID riid,
 {
     if (!ppv) return E_POINTER;
     *ppv = nullptr;
-    LogNativePso("game-style", 86, desc);
+    LogNativePso("game-style", 86, desc); InventoryPso(86, desc);
     ID3D12PipelineState* st = GetStubComputePso((ID3D12Device*)w->real);
     if (st) {
         HRESULT hr = st->QueryInterface(riid, ppv); InitObjVts(); hr = WrapOutput(hr, ppv, g_vtPso, 5);
@@ -1309,6 +2034,7 @@ static D3D12_RESOURCE_ALLOCATION_INFO* __stdcall Dev_GetResourceAllocationInfo25
         ((void* (*)(void*, void*, UINT, UINT, const D3D12_RESOURCE_DESC*))(*(void***)w->real)[25])(w->real, ret, mask, 1, &f);
         XS_LOG("DEVICE slot25   после нормализации -> size=%#llx", (unsigned long long)ret->SizeInBytes);
     }
+    if (xbox && n == 1 && ret->SizeInBytes != ~0ull) GuestColorFootprint(descs[0], *ret);
     static std::atomic<int> k{0}; if (n && (k++ < 6 || ret->SizeInBytes > 0xFFFFFFFFull)) XS_LOG("DEVICE slot25 GetResourceAllocationInfo(%s порядок) dim=%d %llux%u fmt=%d flags=%#x -> size=%#llx align=%#llx", xbox ? "Xbox" : "PC", (int)descs[0].Dimension, (unsigned long long)descs[0].Width, descs[0].Height, (int)descs[0].Format, (unsigned)descs[0].Flags, (unsigned long long)ret->SizeInBytes, (unsigned long long)ret->Alignment);
     return ret;
 }
@@ -1321,6 +2047,11 @@ static D3D12_RESOURCE_ALLOCATION_INFO* __stdcall Dev_GetResourceAllocationInfo10
     std::vector<D3D12_RESOURCE_DESC> d(descs, descs + n);
     for (auto& x : d) { x = PcResourceDesc(x); if (!x.DepthOrArraySize) x.DepthOrArraySize = 1; if (!x.MipLevels) x.MipLevels = 1; if (!x.SampleDesc.Count) x.SampleDesc.Count = 1; }
     ((void* (*)(void*, void*, UINT, UINT, const D3D12_RESOURCE_DESC*, void*))(*(void***)w->real)[56])(w->real, ret, mask, n, d.data(), info1);
+    if (xbox && n == 1 && ret->SizeInBytes != ~0ull && GuestColorFootprint(descs[0], *ret) && info1) {
+        auto* perResource = (D3D12_RESOURCE_ALLOCATION_INFO1*)info1;
+        perResource[0].Offset = 0; perResource[0].SizeInBytes = ret->SizeInBytes;
+        perResource[0].Alignment = ret->Alignment;
+    }
     static std::atomic<int> k{0}; if (k++ < 6 || ret->SizeInBytes > 0xFFFFFFFFull) XS_LOG("DEVICE slot108 GetResourceAllocationInfo1(%s) n=%u dim=%d %llux%u fmt=%d -> size=%#llx align=%#llx", xbox ? "Xbox" : "PC", n, n ? (int)descs[0].Dimension : -1, n ? (unsigned long long)descs[0].Width : 0ull, n ? descs[0].Height : 0u, n ? (int)descs[0].Format : -1, (unsigned long long)ret->SizeInBytes, (unsigned long long)ret->Alignment);
     return ret;
 }
@@ -1328,11 +2059,11 @@ static D3D12_RESOURCE_ALLOCATION_INFO* __stdcall Dev_GetResourceAllocationInfo10
 // Queue слот 35 (+0x118) — ExecuteCommandListsX(count, lists**, X, 0) [callsite 0x142482689: edx=1, r8=&массив списков, r9=64-бит значение (вероятно fence/flags)]: разворачиваем списки и вызываем PC ExecuteCommandLists.
 static HRESULT __stdcall Queue_ExecuteX35(Wrap* w, UINT n, ID3D12CommandList* const* lists, uint64_t x, uint64_t y)
 {
-    std::vector<ID3D12CommandList*> r(n); for (UINT i = 0; i < n; i++) r[i] = (ID3D12CommandList*)Unwrap(lists[i]);
-    ((ID3D12CommandQueue*)w->real)->ExecuteCommandLists(n, r.data());
+    { static bool on = EnvOn("XSX_SHADOW"); if (on) ShadowSyncAll(); }
+    const HRESULT hr = SubmitListsWithWrites(w, n, lists);
     if (BootstrapNoopEnabled()) ++g_bootstrap.execute;
     static std::atomic<int> k{0}; if (k++ < 6) XS_LOG("queue slot35 ExecuteCommandListsX n=%u lists[0]=%p x=%#llx y=%#llx", n, n ? (void*)lists[0] : nullptr, (unsigned long long)x, (unsigned long long)y);
-    return S_OK;
+    return hr;
 }
 // Device слот 8 (PC CreateCommandQueue): тоже оборачиваем.
 static HRESULT __stdcall Dev_CreateCommandQueue8(Wrap* w, const D3D12_COMMAND_QUEUE_DESC* d, REFIID riid, void** out)
@@ -1341,26 +2072,177 @@ static HRESULT __stdcall Dev_CreateCommandQueue8(Wrap* w, const D3D12_COMMAND_QU
     XS_LOG("DEVICE slot8 CreateCommandQueue(PC) type=%d -> hr=0x%08lX q=%p", d ? (int)d->Type : -1, (unsigned long)hr, out ? *out : nullptr); return hr;
 }
 
-// Device слот 80 (+0x280) = WaitFrameEventX-подобный (по анализу пользователя): (this, type, timeout, p3, [rsp+0x20]=flags, [rsp+0x28]=UINT64* frameToken).
-// Выход — frame token (не очередь!); игра использует его как R9 в helper 0x2482660 и индекс (token&0xf). Реализация: монотонный токен, пейсинг ~60 Гц.
-static HRESULT __stdcall Dev_WaitFrameEvent80(Wrap*, uintptr_t type, uintptr_t timeout, uintptr_t a3, uintptr_t flags, uint64_t* out)
+// Local+0x2482448 polls origin0 with timeout0/flag2. The flip2 wait uses
+// INFINITE/flags0 and must keep its existing token. No title data is touched
+// unless the event actually creates an origin token.
+static HRESULT __stdcall Dev_WaitFrameEvent80(Wrap*, UINT kind, UINT timeoutMs, const void* list, UINT flags, uint64_t* out)
 {
-    static std::atomic<uint64_t> tok{0}; static std::atomic<int> n{0}; static LARGE_INTEGER f = {}, last = {};
-    if (!f.QuadPart) { QueryPerformanceFrequency(&f); QueryPerformanceCounter(&last); }
-    LARGE_INTEGER now; QueryPerformanceCounter(&now); LONGLONG want = f.QuadPart / 60;
-    if (now.QuadPart - last.QuadPart < want) Sleep((DWORD)((want - (now.QuadPart - last.QuadPart)) * 1000 / f.QuadPart));
-    QueryPerformanceCounter(&last);
-    uint64_t t = ++tok; if (out && !IsBadWritePtr(out, 8)) *out = t;
-    if (n++ < 4) XS_LOG("DEVICE slot80 WaitFrameEventX type=%llu timeout=%#llx flags=%llu -> token=%llu", (unsigned long long)type, (unsigned long long)timeout, (unsigned long long)flags, (unsigned long long)t);
+    if (list) return E_NOTIMPL;
+    if (out && IsBadWritePtr(out, sizeof *out)) return E_POINTER;
+    const auto result = g_frameClock.Wait(g_frameHostClock, kind, timeoutMs, flags);
+    if (result.token_created && out) *out = result.token;
+    static std::atomic<unsigned> calls{0};
+    const unsigned call = ++calls;
+    if (call <= 12 || !(call % 256)) XS_LOG("DEVICE slot80 WaitFrameEventX kind=%u timeout_ms=%#x flags=%#x -> hr=0x%08lX token_action=%s new_token=%llu tick=%llu wait_us=%llu",
+        kind, timeoutMs, flags, (unsigned long)(uint32_t)result.status,
+        result.token_created ? "created" : "preserved", (unsigned long long)result.token,
+        (unsigned long long)result.tick, (unsigned long long)(result.wait_ns / 1000));
+    return (HRESULT)result.status;
+}
+// GetFrameStatisticsX(token, types, in/out count, records). Game+0x2482710
+// walks 56-byte records and reads a timestamp at +0x18, not a page size.
+// GDK FramePacing.cpp accepts S_FALSE/unavailable. Until complete frame
+// records exist, return no records; do not expose a partially initialized one.
+static HRESULT __stdcall Dev_QueueInfo81(Wrap*, UINT64 token, uint32_t types, uint32_t* count, void* /*out*/)
+{
+    if (!count) return E_POINTER;
+    *count = 0;
+    static std::atomic<unsigned> calls{0};
+    if (calls++ < 4) XS_LOG("DEVICE slot81 GetFrameStatisticsX token=%llu types=%#x -> S_FALSE count=0 (unavailable)", (unsigned long long)token, types);
+    return S_FALSE;
+}
+
+// Device слоты 70/71 (+0x230/+0x238) — «placed» SRV/UAV (по VIctory: берут сырой ресурс и слова описания вида): (this, A, B, C).
+// B — описание ресурса: B[5] = адрес памяти ресурса в памяти игры, B[3] = размер/число элементов, B[0] = {format?|dim?}; A — слова описания вида (A[2] = число элементов/размер).
+// C — адрес дескриптора В ПАМЯТИ ИГРЫ (шаг 0x40). Модель VIctory: на хосте дескриптор НЕ эмулируется побитно — слот игры затирается программной записью
+// {тег 'vVIE', индекс в глобальной таблице, поколение}, а при отрисовке запись разворачивается в настоящий PC-вид. Здесь: реестр + запись в C + попытка разрешить ресурс по адресу.
+struct ViewRec { uint64_t A[8], B[8]; uint32_t kind, gen; uint64_t base; const void* res; };
+static std::vector<ViewRec> g_views; static SRWLOCK g_viewLock = SRWLOCK_INIT; static std::atomic<uint32_t> g_viewResolved{0}, g_viewTotal{0};
+static constexpr uint32_t kViewTag = 0x45495676;   // "vVIE"
+// Буферный placed-вид -> нативный вид на теневой копии памяти игры, записанный в нативный heap по позиции дескриптора (XSX_SHADOW=1).
+static bool NativeHeapSlot(uint64_t guest, uint64_t* real) { int n = g_hrN.load(std::memory_order_acquire); for (int i = 0; i < n; i++) { const HRange& r = g_hr[i]; if (guest - r.guest < r.size) { *real = r.real + (guest - r.guest); return true; } } return false; }
+static void MirrorPlacedBuffer(ID3D12Device* dev, uint32_t kind, const ViewRec& r, uintptr_t C)
+{
+    static std::atomic<int> logn{0}; const bool log = logn++ < 16;
+    const uint32_t fmt = (uint32_t)(r.B[0] & 0xffffffff); uint64_t real = 0;
+    if (!NativeHeapSlot(C, &real)) { if (log) XS_LOG("SHADOWVIEW: handle %p вне зарегистрированных heap — пропуск", (void*)C); return; }
+    const uint64_t address = r.B[5];
+    if (kind == 0) {   // SRV: слова 4-5 FirstElement, 6 NumElements, 7 Stride, 8 Flags
+        const uint32_t stride = (uint32_t)(r.B[3] >> 32), num = (uint32_t)(r.B[3] & 0xffffffff), flags = (uint32_t)(r.B[4] & 0xffffffff), mapping = (uint32_t)(r.B[1] & 0xffffffff);
+        const uint64_t first = r.B[2]; uint32_t elem = stride ? stride : ((flags & 1) ? 4 : ConsoleElementBytes(fmt));
+        if (!elem) { if (log) XS_LOG("SHADOWVIEW: SRV fmt=%u: размер элемента неизвестен", fmt); return; }
+        const uint64_t start = address + first * elem; uint64_t off = 0;
+        ID3D12Resource* sh = ShadowFor(dev, start, (uint64_t)num * elem, &off, elem); if (!sh) return;
+        if (off % elem) { if (log) XS_LOG("SHADOWVIEW: смещение %#llx не кратно элементу %u", (unsigned long long)off, elem); return; }
+        D3D12_SHADER_RESOURCE_VIEW_DESC d = {}; d.ViewDimension = D3D12_SRV_DIMENSION_BUFFER; d.Shader4ComponentMapping = mapping ? mapping : D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        d.Format = stride ? DXGI_FORMAT_UNKNOWN : ((flags & 1) ? DXGI_FORMAT_R32_TYPELESS : XboxFormatToPc((DXGI_FORMAT)fmt));
+        d.Buffer.FirstElement = off / elem; d.Buffer.NumElements = num; d.Buffer.StructureByteStride = stride; d.Buffer.Flags = (flags & 1) ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
+        dev->CreateShaderResourceView(sh, &d, D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)real });
+        if (log) XS_LOG("SHADOWVIEW: SRV fmt=%u->%d stride=%u num=%u addr=%#llx -> shadow %p +%#llx (слот native %p)", fmt, (int)d.Format, stride, num, (unsigned long long)start, (void*)sh, (unsigned long long)off, (void*)real);
+    } else if (log) XS_LOG("SHADOWVIEW: UAV буфер пока не зеркалируется (нужен DEFAULT-буфер и обратная запись)");
+}
+static HRESULT PlacedViewImpl(uint32_t kind, uintptr_t A, uintptr_t B, uintptr_t C, ID3D12Device* dev = nullptr)
+{
+    ViewRec r = {}; r.kind = kind;
+    if (A && !IsBadReadPtr((void*)A, 64)) memcpy(r.A, (void*)A, 64);
+    if (B && !IsBadReadPtr((void*)B, 64)) memcpy(r.B, (void*)B, 64);
+    uint64_t base = 0; { SharedSrwLock g(g_addrResLock); const AddrRes* ar = FindAddrRes(r.B[5], &base); if (ar) { r.res = ar->res; r.base = base; } }
+    uint32_t idx, gen = 1; { ExclusiveSrwLock g(g_viewLock); idx = (uint32_t)g_views.size(); r.gen = gen; g_views.push_back(r); }
+    static bool noWrite = [] { char v[4]; return GetEnvironmentVariableA("XSX_NO_VIEW_WRITE", v, sizeof v) > 0; }();
+    if (!noWrite && C && !IsBadWritePtr((void*)C, 12)) { uint32_t* d = (uint32_t*)C; d[0] = kViewTag; d[1] = idx; d[2] = gen; }
+    ++g_viewTotal; if (r.res) ++g_viewResolved;
+    { static bool on = EnvOn("XSX_SHADOW"); if (on && dev && C && r.A[0] % 0x100000000ull == 1) MirrorPlacedBuffer(dev, kind, r, C); }
+    static std::atomic<int> n{0}; int k = n++;
+    if (k < 12) XS_LOG("PLACEDVIEW#%u слова ресурса: dim=%llu align=%#llx w=%#llx h=%u dep|mips=%#x fmt=%u samples=%u layout=%#x flags=%#x; вид: fmt=%u dim=%u addr=%#llx", k,
+        (unsigned long long)(r.A[0] & 0xffffffff), (unsigned long long)r.A[1], (unsigned long long)r.A[2], (unsigned)(r.A[3] & 0xffffffff), (unsigned)(r.A[3] >> 32), (unsigned)(r.A[4] & 0xffffffff), (unsigned)(r.A[4] >> 32), (unsigned)(r.A[5] & 0xffffffff), (unsigned)(r.A[6] & 0xffffffff),
+        (unsigned)(r.B[0] & 0xffffffff), (unsigned)(r.B[0] >> 32), (unsigned long long)r.B[5]);
+    if (k < 8 || (k % 5000) == 0) XS_LOG("PLACEDVIEW#%u kind=%u idx=%u dest=%p B[0]=%#llx B[3]=%#llx addr=%#llx -> %s (разрешено %u из %u)", k, kind, idx, (void*)C, (unsigned long long)r.B[0], (unsigned long long)r.B[3], (unsigned long long)r.B[5],
+        r.res ? "ресурс найден (смещение внутри)" : "ресурс по адресу НЕ найден", g_viewResolved.load(), g_viewTotal.load());
     return S_OK;
 }
-// Device слот 81 (+0x288): (this, queue, id=0x11100, uint32* count [in=6], void* out) -> HRESULT [callsite 0x142482710]. Игра требует S_OK, count!=0 и в out[0] значение 0x10000 или 0x1000 (похоже на размер страницы/выравнивание).
-// ПРЕДПОЛОЖЕНИЕ (семантика не подтверждена): count=1, out[0]=0x10000, остальное 0.
-static HRESULT __stdcall Dev_QueueInfo81(Wrap*, void* queue, uint32_t id, uint32_t* count, void* out)
+static HRESULT __stdcall Dev_PlacedView70(Wrap* w, uintptr_t A, uintptr_t B, uintptr_t C) { static bool off = EnvOn("XSX_NO_PLACEDVIEW"); return off ? S_OK : PlacedViewImpl(0, A, B, C, (ID3D12Device*)w->real); }
+static HRESULT __stdcall Dev_PlacedView71(Wrap* w, uintptr_t A, uintptr_t B, uintptr_t C) { static bool off = EnvOn("XSX_NO_PLACEDVIEW"); return off ? S_OK : PlacedViewImpl(1, A, B, C, (ID3D12Device*)w->real); }
+
+// ---- Диагностика: что именно игра привязывает перед Draw/Dispatch (XSX_DRAW_TRACE=1) ----
+static void DescribeRecord(uintptr_t addr, char* out, size_t cap)
 {
-    if (count && !IsBadWritePtr(count, 4)) *count = 1; if (out && !IsBadWritePtr(out, 16)) { memset(out, 0, 16); *(uint32_t*)out = 0x10000; }
-    static std::atomic<int> n{0}; if (n++ < 3) XS_LOG("DEVICE slot81 queue-info id=%#x queue=%p -> count=1 out[0]=0x10000 (ПРЕДПОЛОЖЕНИЕ)", id, queue);
-    return S_OK;
+    out[0] = 0; uint32_t rec[3] = {};
+    if (!addr) { snprintf(out, cap, "<handle вне известных heap>"); return; }
+    if (!ReadProcessMemory(GetCurrentProcess(), (void*)addr, rec, sizeof rec, nullptr)) { snprintf(out, cap, "<нечитаемо %p>", (void*)addr); return; }
+    if (rec[0] != kViewTag) { snprintf(out, cap, "raw %08x %08x %08x", rec[0], rec[1], rec[2]); return; }
+    ViewRec v; { SharedSrwLock g(g_viewLock); if (rec[1] >= g_views.size()) { snprintf(out, cap, "vVIE idx=%u вне реестра", rec[1]); return; } v = g_views[rec[1]]; }
+    snprintf(out, cap, "vVIE idx=%u kind=%u B0=%#llx B3=%#llx addr=%#llx res=%p", rec[1], v.kind, (unsigned long long)v.B[0], (unsigned long long)v.B[3], (unsigned long long)v.B[5], v.res);
+}
+static void DrawTrace(Wrap* w, const char* what, uint32_t x, uint32_t y)
+{
+    static std::atomic<unsigned> n{0}; unsigned k = n++;
+    if (IsXboxList(w)) {   // новый использованный PSO -> его хеши шейдеров
+        uintptr_t pso = 0; { SharedSrwLock g(g_xstateLock); auto it = g_xstate.find(w); if (it != g_xstate.end()) pso = it->second.pso; }
+        std::string hs; { SharedSrwLock g(g_psoHashLock); auto it = g_psoHashes.find((void*)pso); if (it != g_psoHashes.end()) hs = it->second; }
+        if (!hs.empty()) { bool fresh; { ExclusiveSrwLock g(g_psoHashLock); fresh = g_usedPso.insert(hs).second; } if (fresh) { XS_LOG("USEDPSO %s #%zu (%s)", hs.c_str(), g_usedPso.size(), what);
+            std::vector<std::string> bl; { SharedSrwLock g(g_psoHashLock); auto it = g_psoBlobs.find((void*)pso); if (it != g_psoBlobs.end()) bl = it->second; }
+            for (size_t b = 0; b < bl.size(); b++) { std::string hx; char t[4]; for (unsigned char c : bl[b].substr(bl[b].find(':') + 1)) { snprintf(t, sizeof t, "%02x", c); hx += t; } XS_LOG("USEDPSO-BLOB #%zu [%s] %zu Б: %s", g_usedPso.size(), bl[b].substr(0, bl[b].find(':')).c_str(), bl[b].size() - bl[b].find(':') - 1, hx.c_str()); } } }
+    }
+    if (!IsXboxList(w) || !(k < 40 || (k % 3000) == 0)) return;
+    XListState st; { SharedSrwLock g(g_xstateLock); auto it = g_xstate.find(w); if (it == g_xstate.end()) return; st = it->second; }
+    XS_LOG("DRAWSTATE #%u %s(%u,%u) list=%p pso=%p записей=%zu", k, what, x, y, (void*)w, (void*)st.pso, st.slots.size());
+    for (auto& e : st.slots) {
+        int slot = e.first.first; auto& v = e.second; char d[300] = {};
+        if (slot == 35 || slot == 36) {
+            for (int i = 0; i < 3; i++) { char t[120]; uint64_t gst = GpuHandleToGuest(v[1]); DescribeRecord(gst ? gst + 32 * i : 0, t, sizeof t); size_t l = strlen(d); snprintf(d + l, sizeof d - l, "%s[%d] %s", i ? " | " : "", i, t); }
+            XS_LOG("  slot %d %s table root=%llu handle=%p: %s", slot, slot == 35 ? "CS" : "GFX", (unsigned long long)v[0], (void*)v[1], d);
+        } else if (slot >= 37 && slot <= 40) {
+            uint32_t dw[4] = {}; if (slot >= 39) ReadProcessMemory(GetCurrentProcess(), (void*)v[2], dw, sizeof dw, nullptr);
+            XS_LOG("  slot %d constants root=%llu b=%llx dwords=%08x %08x %08x %08x", slot, (unsigned long long)v[0], (unsigned long long)v[1], dw[0], dw[1], dw[2], dw[3]);
+        } else if (slot >= 41 && slot <= 46) {
+            uint64_t base = 0; const AddrRes* ar; { SharedSrwLock g(g_addrResLock); ar = FindAddrRes(v[1], &base); }
+            uint32_t mem[24] = {}; SIZE_T got = 0; ReadProcessMemory(GetCurrentProcess(), (void*)v[1], mem, sizeof mem, &got);
+            XS_LOG("  slot %d root-view root=%llu addr=%p c=%llx d=%llx -> %s; первые %zu Б: %08x %08x %08x %08x | %08x %08x %08x %08x | %08x %08x %08x %08x | %08x %08x %08x %08x | %08x %08x %08x %08x | %08x %08x %08x %08x", slot, (unsigned long long)v[0], (void*)v[1], (unsigned long long)v[2], (unsigned long long)v[3], ar ? "в ресурсе, найден" : "ресурс не найден", (size_t)got,
+                mem[0], mem[1], mem[2], mem[3], mem[4], mem[5], mem[6], mem[7], mem[8], mem[9], mem[10], mem[11], mem[12], mem[13], mem[14], mem[15], mem[16], mem[17], mem[18], mem[19], mem[20], mem[21], mem[22], mem[23]);
+        } else XS_LOG("  slot %d args %llx %llx %llx %llx", slot, (unsigned long long)v[0], (unsigned long long)v[1], (unsigned long long)v[2], (unsigned long long)v[3]);
+    }
+}
+static void InstallDeviceReturnTrace()
+{
+    if (!ReturnTraceMode()) return;
+    using namespace xsx::returns;
+    TraceObjectBase<1>(g_devVt); // Slot7 is GetNodeCount, so the base helper skips it.
+#define TRACE_DEVICE_PC(slot, method) InstallMember<1, slot, Wrap>(g_devVt, &ID3D12Device::method, #method)
+    TRACE_DEVICE_PC(10, CreateGraphicsPipelineState);
+    TRACE_DEVICE_PC(11, CreateComputePipelineState);
+    TRACE_DEVICE_PC(13, CheckFeatureSupport);
+    TRACE_DEVICE_PC(16, CreateRootSignature);
+    TRACE_DEVICE_PC(27, CreateCommittedResource);
+    TRACE_DEVICE_PC(28, CreateHeap);
+    TRACE_DEVICE_PC(29, CreatePlacedResource);
+    TRACE_DEVICE_PC(30, CreateReservedResource);
+    TRACE_DEVICE_PC(31, CreateSharedHandle);
+    TRACE_DEVICE_PC(32, OpenSharedHandle);
+    TRACE_DEVICE_PC(33, OpenSharedHandleByName);
+    TRACE_DEVICE_PC(34, MakeResident);
+    TRACE_DEVICE_PC(35, Evict);
+    TRACE_DEVICE_PC(37, GetDeviceRemovedReason);
+    TRACE_DEVICE_PC(39, CreateQueryHeap);
+    TRACE_DEVICE_PC(40, SetStablePowerState);
+#undef TRACE_DEVICE_PC
+#define TRACE_DEVICE(slot, method) Install<1, slot>(g_devVt, &method, #method)
+    TRACE_DEVICE(0, Dev_QI);
+    TRACE_DEVICE(8, Dev_CreateCommandQueue8);
+    TRACE_DEVICE(9, Dev_CreateCommandAllocator9);
+    TRACE_DEVICE(12, Dev_CreateCommandList12);
+    TRACE_DEVICE(14, Dev_CreateDescriptorHeap14);
+    TRACE_DEVICE(36, Dev_CreateFence36);
+    TRACE_DEVICE(41, Dev_CreateCommandSignature41);
+    TRACE_DEVICE(48, Dev_CreateCommandQueue48);
+    TRACE_DEVICE(55, Dev_PsoUpdates55);
+    TRACE_DEVICE(57, Dev_NativePso57);
+    TRACE_DEVICE(61, Dev_CreateSamplerBlob61);
+    TRACE_DEVICE(62, Dev_NativePso62);
+    TRACE_DEVICE(67, Dev_NativePso67);
+    TRACE_DEVICE(70, Dev_PlacedView70);
+    TRACE_DEVICE(71, Dev_PlacedView71);
+    TRACE_DEVICE(73, Dev_CreateCommandList73);
+    TRACE_DEVICE(74, Dev_HeapFromRange74);
+    TRACE_DEVICE(76, Dev_CreateCommittedResource76);
+    TRACE_DEVICE(78, Dev_SetFrameInterval78);
+    TRACE_DEVICE(79, Dev_ScheduleFrameEvent79);
+    TRACE_DEVICE(80, Dev_WaitFrameEvent80);
+    TRACE_DEVICE(81, Dev_QueueInfo81);
+    TRACE_DEVICE(86, Dev_NativePso86);
+    TRACE_DEVICE(127, Dev_CreateCommittedResource127);
+    TRACE_DEVICE(133, Dev_CreatePlacedResourceX133);
+#undef TRACE_DEVICE
+    XS_LOG("RET tracing mode=%d enabled: typed HRESULT/output contracts, value/refcount returns only in mode2; unknown and void methods keep existing diagnostics", ReturnTraceMode());
 }
 static void InitDevVt()
 {
@@ -1372,13 +2254,16 @@ static void InitDevVt()
         xs_fwd_15, xs_fwd_16, xs_fwd_17, xs_fwd_18, xs_fwd_19, xs_fwd_20, xs_fwd_21, xs_fwd_22, xs_fwd_23, xs_fwd_24, xs_fwd_25, xs_fwd_26, xs_fwd_27, xs_fwd_28, xs_fwd_29, xs_fwd_30,
         xs_fwd_31, xs_fwd_32, xs_fwd_33, xs_fwd_34, xs_fwd_35, xs_fwd_36, xs_fwd_37, xs_fwd_38, xs_fwd_39, xs_fwd_40, xs_fwd_41, xs_fwd_42, xs_fwd_43 };
     for (int i = 0; i < 44; i++) g_devVt[i] = (void*)fw[i];
-    if (getenv("XSX_DEV_TRACE")) { g_trace = true; FillTrace(std::make_integer_sequence<int, 44>{}); }
+    // The legacy argument logger casts to a six-argument signature. Do not
+    // let it change the ABI underneath the typed return observer.
+    if (getenv("XSX_DEV_TRACE") && !ReturnTraceMode()) { g_trace = true; FillTrace(std::make_integer_sequence<int, 44>{}); }
     g_devVt[0] = (void*)Dev_QI; g_devVt[43] = (void*)Dev_GetAdapterLuid; g_devVt[76] = (void*)Dev_CreateCommittedResource76; g_devVt[48] = (void*)Dev_CreateCommandQueue48; g_devVt[9] = (void*)Dev_CreateCommandAllocator9; g_devVt[14] = (void*)Dev_CreateDescriptorHeap14;
     g_devVt[55] = (void*)Dev_PsoUpdates55; g_devVt[57] = (void*)Dev_NativePso57;
     g_devVt[36] = (void*)Dev_CreateFence36;
-    g_devVt[41] = (void*)Dev_CreateCommandSignature41; g_devVt[8] = (void*)Dev_CreateCommandQueue8; g_devVt[80] = (void*)Dev_WaitFrameEvent80; g_devVt[81] = (void*)Dev_QueueInfo81; g_devVt[12] = (void*)Dev_CreateCommandList12; g_devVt[25] = (void*)Dev_GetResourceAllocationInfo25; g_devVt[108] = (void*)Dev_GetResourceAllocationInfo108; g_devVt[61] = (void*)Dev_CreateSamplerBlob61; g_devVt[62] = (void*)Dev_NativePso62; g_devVt[74] = (void*)Dev_HeapFromRange74; g_devVt[86] = (void*)Dev_NativePso86; g_devVt[67] = (void*)Dev_NativePso67; g_devVt[127] = (void*)Dev_Slot127; g_devVt[133] = (void*)Dev_CreatePlacedResourceX133; g_devVt[78] = (void*)Dev_FramePacing; g_devVt[79] = (void*)Dev_FramePacing;
+    g_devVt[41] = (void*)Dev_CreateCommandSignature41; g_devVt[8] = (void*)Dev_CreateCommandQueue8; g_devVt[80] = (void*)Dev_WaitFrameEvent80; g_devVt[81] = (void*)Dev_QueueInfo81; g_devVt[12] = (void*)Dev_CreateCommandList12; g_devVt[25] = (void*)Dev_GetResourceAllocationInfo25; g_devVt[108] = (void*)Dev_GetResourceAllocationInfo108; g_devVt[61] = (void*)Dev_CreateSamplerBlob61; g_devVt[62] = (void*)Dev_NativePso62; g_devVt[74] = (void*)Dev_HeapFromRange74; g_devVt[86] = (void*)Dev_NativePso86; g_devVt[67] = (void*)Dev_NativePso67; g_devVt[70] = (void*)Dev_PlacedView70; g_devVt[71] = (void*)Dev_PlacedView71; g_devVt[127] = (void*)Dev_CreateCommittedResource127; g_devVt[133] = (void*)Dev_CreatePlacedResourceX133; g_devVt[78] = (void*)Dev_SetFrameInterval78; g_devVt[79] = (void*)Dev_ScheduleFrameEvent79;
     g_devVt[17] = (void*)Dev_CreateCBV; g_devVt[18] = (void*)Dev_CreateSRV; g_devVt[19] = (void*)Dev_CreateUAV; g_devVt[20] = (void*)Dev_CreateRTV; g_devVt[21] = (void*)Dev_CreateDSV;
     g_devVt[22] = (void*)Dev_CreateSampler; g_devVt[23] = (void*)Dev_CopyDescriptors; g_devVt[24] = (void*)Dev_CopyDescriptorsSimple; g_devVt[73] = (void*)Dev_CreateCommandList73;
+    InstallDeviceReturnTrace();
 }
 
 // ---- D3D12XboxCreateDevice(adapter, params, riid, ppDevice) ----
@@ -1389,6 +2274,7 @@ static void InitDevVt()
 extern "C" HRESULT WINAPI xsXboxCreateDevice(
     IUnknown* adapter, const void* params, REFIID riid, void** ppDevice)
 {
+    ConfigureReturnTrace();
     static PVOID fault_trace = AddVectoredExceptionHandler(1, &TraceGraphicsFault); 
     (void)fault_trace;
     CALLER(c);

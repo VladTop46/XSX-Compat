@@ -9,6 +9,7 @@
 #include <stdarg.h>
 #include "phys.h"
 #include <map>
+#include <atomic>
 
 static constexpr size_t ALIGNMENT = 256;
 #define XLOG(...) do { fprintf(stderr, "[XMem] " __VA_ARGS__); fputc('\n', stderr); fflush(stderr); } while (0)
@@ -20,8 +21,12 @@ extern "C" {
 __declspec(dllexport) void* XMemAlloc(size_t size, uint64_t attributes)
 {
     if (size == 0) size = 1;
-    void* ptr = _aligned_malloc(size, ALIGNMENT);
-    XLOG("Alloc size=%zu attrs=0x%llx -> %p", size, (unsigned long long)attributes, ptr);
+    // Attributes24..28 encode log2(alignment), independently of page class
+    // (bits14..15) and memory type (bits29..32). Preserve our256-byte default.
+    size_t alignment = size_t{1} << ((attributes >> 24) & 31);
+    if (alignment < ALIGNMENT) alignment = ALIGNMENT;
+    void* ptr = _aligned_malloc(size, alignment);
+    XLOG("Alloc size=%zu attrs=0x%llx alignment=%zu -> %p", size, (unsigned long long)attributes, alignment, ptr);
     return ptr;
 }
 __declspec(dllexport) void XMemFree(void* ptr, uint64_t attributes)
@@ -96,7 +101,8 @@ __declspec(dllexport) void* XMemMapPhysicalPages(void* va, size_t pages, const u
         viaSection = phys::MapPages(pg, fb, PLog);
     } else { fb.resize(pages); for (size_t i = 0; i < pages; i++) fb[i] = i; }
     size_t okFb = 0; for (size_t i : fb) if (VirtualAlloc((char*)va + i * kPage, kPage, MEM_COMMIT, PAGE_READWRITE)) okFb++;
-    XLOG("MapPhysicalPages va=%p pages=%zu (%zu MiB) first=%#llx -> section=%zu private=%zu/%zu views=%llu", va, pages, pages * kPage >> 20, array ? (unsigned long long)array[0] : 0ULL, viaSection, okFb, fb.size(), (unsigned long long)phys::g.viewCount);
+    { static std::atomic<long> nc{0}; static DWORD t0 = GetTickCount(); long k = ++nc;   // единичные страницы идут десятками тысяч: логируем выборочно
+      if (pages > 1 || k <= 20 || k % 5000 == 0) XLOG("MapPhysicalPages #%ld va=%p pages=%zu (%zu MiB) first=%#llx -> section=%zu private=%zu/%zu views=%llu t=%lums", k, va, pages, pages * kPage >> 20, array ? (unsigned long long)array[0] : 0ULL, viaSection, okFb, fb.size(), (unsigned long long)phys::g.viewCount, (unsigned long)(GetTickCount() - t0)); }
     return (viaSection + okFb == pages) ? va : nullptr;
 }
 __declspec(dllexport) BOOL XMemFreePhysicalPages(size_t pages, const uintptr_t* array)
@@ -131,6 +137,21 @@ __declspec(dllexport) BOOL XMemMapPhysicalPagesScatter(void** addrs, size_t coun
     if (n++ < 16) { uintptr_t mn = ~0ull, mx = 0; for (size_t i = 0; ids && i < count; i++) { mn = ids[i] < mn ? ids[i] : mn; mx = ids[i] > mx ? ids[i] : mx; }
         XLOG("MapPhysicalPagesScatter count=%zu first=%p ids=[%#llx..%#llx] -> section+private=%zu (dup-private=%zu) fallback=%zu/%zu unmapped=%zu views=%llu", count, count ? addrs[0] : nullptr, (unsigned long long)mn, (unsigned long long)mx, viaSection, privCnt, okFb, fb.size(), unm, (unsigned long long)phys::g.viewCount); }
     return viaSection + okFb + unm == count;
+}
+
+// Project extension (not an Xbox API): DirectStorage destinations given as a list of 64 KiB
+// physical page ids (ids[i] covers bytes [i*64K, (i+1)*64K) of the destination, offset by byteOffset).
+extern "C" __declspec(dllexport) BOOL XsxPhysWrite(const uintptr_t* ids, uint64_t byteOffset, const void* src, uint64_t size)
+{
+    if (!ids || (!src && size)) return FALSE;
+    phys::Init(PLog);
+    const uint8_t* p = (const uint8_t*)src; uint64_t pos = byteOffset, left = size;
+    while (left) {
+        const uint64_t page = pos / kPage, in = pos % kPage, n = left < kPage - in ? left : kPage - in;
+        if (!phys::WritePage(ids[page], (size_t)in, p, (size_t)n)) { XLOG("XsxPhysWrite id=%#llx off=%#llx n=%llu FAILED", (unsigned long long)ids[page], (unsigned long long)in, (unsigned long long)n); return FALSE; }
+        p += n; pos += n; left -= n;
+    }
+    return TRUE;
 }
 
 #define XSTUB(name) \

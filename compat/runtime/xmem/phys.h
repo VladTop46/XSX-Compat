@@ -35,7 +35,7 @@ typedef BOOL (WINAPI* UnmapViewOfFile2Fn)(HANDLE, PVOID, ULONG);
 #define MEM_PRESERVE_PLACEHOLDER 0x00000002
 #endif
 
-struct View { size_t size; uintptr_t id0; };              // view, отображающий подряд идущие id начиная с id0
+struct View { size_t size; uintptr_t id0; }; // New views cover exactly one64-KiB Xbox page.
 struct State {
     std::mutex m;
     bool init = false, ok = false;
@@ -47,6 +47,34 @@ struct State {
     uint64_t mapCalls = 0, viewCount = 0, fallbacks = 0;
 };
 static State g;
+// ---- native-gfx (XSX_NATIVE_GFX=1): physical pages = amdgpu GTT BOs via xsxgpu unixlib. ----
+// The CPU view is an mmap of the BO placed over our placeholder; the GPU sees the same page at
+// the same VA. Wine's own bookkeeping keeps reporting the placeholder (documented limitation).
+typedef int (WINAPI* XgOpenFn)(unsigned*, unsigned*, unsigned long long*);
+typedef int (WINAPI* XgMapFn)(void*, unsigned long long, const ULONG_PTR*, unsigned long long);
+typedef int (WINAPI* XgUnmapFn)(void*, unsigned long long);
+typedef int (WINAPI* XgWriteFn)(unsigned long long, unsigned long long, const void*, unsigned long long);
+static struct { bool on = false; XgMapFn map = nullptr; XgUnmapFn unmap = nullptr; XgWriteFn write = nullptr; uintptr_t nextPrivId = 0; uint64_t maps = 0, unmaps = 0, failures = 0; } gn;
+static bool NativeWanted()
+{
+    char v[8]; DWORD n = GetEnvironmentVariableA("XSX_NATIVE_GFX", v, sizeof v);
+    return n && v[0] == '1';
+}
+static bool NativeInit(void (*log)(const char*, ...))
+{
+    HMODULE m = LoadLibraryA("xsxgpu.dll");
+    if (!m) { log("phys: XSX_NATIVE_GFX=1, но xsxgpu.dll не загружена err=%lu -> секции", GetLastError()); return false; }
+    auto op = (XgOpenFn)GetProcAddress(m, "xsxgpu_open");
+    gn.map = (XgMapFn)GetProcAddress(m, "xsxgpu_phys_map"); gn.unmap = (XgUnmapFn)GetProcAddress(m, "xsxgpu_phys_unmap"); gn.write = (XgWriteFn)GetProcAddress(m, "xsxgpu_phys_write");
+    unsigned fam = 0, dev = 0; unsigned long long vaMax = 0;
+    const int r = op && gn.map && gn.unmap ? op(&fam, &dev, &vaMax) : -1;
+    if (r) { log("phys: xsxgpu_open r=%d -> секции", r); return false; }
+    // Private pages (XSX_XMEM_DUP_PRIVATE) take unique ids from the top of the id space.
+    gn.nextPrivId = kFirstId + kIdStep * ((32ull << 30) / kPage - 1);
+    gn.on = true;
+    log("phys: NATIVE GPU-память: физические страницы = GTT BO amdgpu (family=%u device=%#x va_max=%#llx)", fam, dev, vaMax);
+    return true;
+}
 
 static bool Enabled()
 {
@@ -58,11 +86,13 @@ static bool Init(void (*log)(const char*, ...))
     if (g.init) return g.ok;
     g.init = true;
     if (!Enabled()) { log("phys: алиасинг отключён (XSX_XMEM_ALIAS=0)"); return false; }
+    const bool native = NativeWanted() && NativeInit(log);
     HMODULE kb = LoadLibraryW(L"kernelbase.dll");
     g.va2 = (VirtualAlloc2Fn)GetProcAddress(kb, "VirtualAlloc2");
     g.mv3 = (MapViewOfFile3Fn)GetProcAddress(kb, "MapViewOfFile3");
     g.uv2 = (UnmapViewOfFile2Fn)GetProcAddress(kb, "UnmapViewOfFile2");
     if (!g.va2 || !g.mv3 || !g.uv2) { log("phys: нет VirtualAlloc2/MapViewOfFile3/UnmapViewOfFile2 -> без алиасинга"); return false; }
+    if (native) { g.ok = true; return true; }   // placeholders still reserved via VirtualAlloc2; no section needed
     g.section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, (DWORD)(kSectionSize >> 32), (DWORD)kSectionSize, nullptr);
     if (!g.section) { log("phys: CreateFileMapping(%llu ГиБ) err=%lu -> без алиасинга", (unsigned long long)(kSectionSize >> 30), GetLastError()); return false; }
     g.ok = true;
@@ -88,7 +118,7 @@ static bool InOurRegion(uintptr_t va, size_t size)
     auto it = g.regions.upper_bound(va); if (it == g.regions.begin()) return false; --it;
     return va >= it->first && va + size <= it->first + it->second;
 }
-static bool IdOk(uintptr_t id) { return id >= kFirstId && (id % kIdStep) == 0 && IdOff(id) + kPage <= kSectionSize; }
+static bool IdOk(uintptr_t id) { return id >= kFirstId && (id % kIdStep) == 0 && IdOff(id) + kPage <= (gn.on ? (32ull << 30) : kSectionSize); }
 
 static bool MapOne(uintptr_t va, size_t size, uintptr_t id0)
 {
@@ -100,6 +130,11 @@ static bool MapOne(uintptr_t va, size_t size, uintptr_t id0)
 // Снять все view, пересекающиеся с [va, va+size); части view вне диапазона восстанавливаются (переотображаются).
 static bool UnmapRange(uintptr_t va, size_t size, void (*log)(const char*, ...))
 {
+    if (gn.on) {   // exact range: BO overlays are per-64KiB-page mmaps, neighbours are untouched
+        const int r = gn.unmap((void*)va, size / kPage); gn.unmaps++;
+        if (r) { gn.failures++; log("phys: NATIVE unmap %p+%#zx r=%d", (void*)va, size, r); return false; }
+        return true;
+    }
     uintptr_t end = va + size;
     for (auto it = g.priv.lower_bound(va); it != g.priv.end() && it->first < end;) {
         if (!VirtualFree((void*)it->first, it->second, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) log("phys: release private %p err=%lu", (void*)it->first, GetLastError());
@@ -131,22 +166,31 @@ static bool UnmapRange(uintptr_t va, size_t size, void (*log)(const char*, ...))
     return true;
 }
 
-// Отобразить подряд идущие id [id0, id0+n) в VA va (va внутри нашего placeholder-резерва).
+// Keep native views at the independently remappable Xbox page granularity.
+// Coalescing a run into one view forces UnmapRange to remove the whole view
+// while restoring its tails. Game threads writing a retained neighbor then
+// see an unbacked interval, even though their page was not requested unmapped.
+// The map mutex cannot protect those ordinary CPU writes.
 static bool MapRun(uintptr_t va, size_t n, uintptr_t id0, void (*log)(const char*, ...))
 {
+    if (gn.on) {
+        std::vector<ULONG_PTR> ids(n); for (size_t k = 0; k < n; k++) ids[k] = id0 + k * kIdStep;
+        const int r = gn.map((void*)va, n, ids.data(), 1); gn.maps++;
+        if (r) { gn.failures++; log("phys: NATIVE map va=%p id=%#llx n=%zu r=%d", (void*)va, (unsigned long long)id0, n, r); return false; }
+        g.viewCount += n; return true;
+    }
     size_t size = n * kPage;
     if (!UnmapRange(va, size, log)) return false;
-    if (MapOne(va, size, id0)) return true;
-    // Диапазон состоит из нескольких placeholder-кусков (после снятия соседних view) — отображаем постранично.
-    DWORD err = GetLastError(); size_t ok = 0;
+    size_t ok = 0;
     for (size_t k = 0; k < n; k++) ok += MapOne(va + k * kPage, kPage, id0 + k * kIdStep);
-    if (ok != n) { log("phys: MapViewOfFile3(va=%p, id=%#llx, n=%zu) err=%lu, постранично %zu/%zu", (void*)va, (unsigned long long)id0, n, err, ok, n); return false; }
+    if (ok != n) { log("phys: page views va=%p id=%#llx n=%zu mapped=%zu/%zu err=%lu", (void*)va, (unsigned long long)id0, n, ok, n, GetLastError()); return false; }
     return true;
 }
 
 // Частная (не разделяемая) память на месте страницы va внутри нашего резерва.
 static bool MapPrivate(uintptr_t va, void (*log)(const char*, ...))
 {
+    if (gn.on) { const uintptr_t id = gn.nextPrivId; gn.nextPrivId -= kIdStep; return MapRun(va, 1, id, log); }
     if (!UnmapRange(va, kPage, log)) return false;
     VirtualFree((void*)va, kPage, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
     void* r = g.va2(nullptr, (void*)va, kPage, MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0);
@@ -154,7 +198,8 @@ static bool MapPrivate(uintptr_t va, void (*log)(const char*, ...))
     g.priv[va] = kPage; return true;
 }
 
-// Общая точка: отобразить список (va_i, id_i). Подряд идущие VA с подряд идущими id объединяются в один view.
+// Общая точка: список (va_i,id_i). Runs batch bookkeeping only; every native
+// section view remains one64-KiB page so partial remaps retain neighbors.
 // Возвращает число страниц, отображённых через секцию; остальное (va вне наших резервов) — false в out-флаге fallback.
 static size_t MapPages(const std::vector<std::pair<uintptr_t, uintptr_t>>& pages, std::vector<size_t>& fallbackIdx, void (*log)(const char*, ...))
 {
@@ -177,4 +222,15 @@ static bool UnmapPages(uintptr_t va, size_t n, void (*log)(const char*, ...))
     return UnmapRange(va, n * kPage, log);
 }
 
+// Write bytes into physical page `id` at `offset` (< one page). Native: BO CPU mapping; sections: temporary view.
+static bool WritePage(uintptr_t id, size_t offset, const void* src, size_t size)
+{
+    if (!IdOk(id) || offset + size > kPage) return false;
+    if (gn.on) return gn.write && gn.write(id, offset, src, size) == 0;
+    if (!g.section) return false;
+    const uint64_t off = IdOff(id);
+    void* v = MapViewOfFile(g.section, FILE_MAP_WRITE, (DWORD)(off >> 32), (DWORD)off, kPage);
+    if (!v) return false;
+    memcpy((char*)v + offset, src, size); UnmapViewOfFile(v); return true;
+}
 } // namespace phys
